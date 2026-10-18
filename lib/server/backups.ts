@@ -397,7 +397,7 @@ export async function processRestoreJob(job: StoredImportJob): Promise<void> {
         const restored: Workspace = { subjects: [], notes: [], cards: [], events: [], limit: 10, zone: 'UTC' };
         importBackup(restored, { format: 'studysprint', version: 1, workspace: {...metadata, notes:[]} });
         const remapped = new Map<string, string>();
-        for (const kind of ['subjects', 'notes', 'cards', 'events'] as const) for (const record of metadata[kind]) remapped.set(`${kind}:${record.id}`, await restoreId(job.id, kind, record.id));
+        for (const kind of ['subjects', 'notes', 'cards', 'events', 'quizzes', 'quizAttempts'] as const) for (const record of metadata[kind]||[]) remapped.set(`${kind}:${record.id}`, await restoreId(job.id, kind, record.id));
         const mapped = async (kind: string, value: string) => { if(!value)return '';const key=`${kind}:${value}`;if(!remapped.has(key))remapped.set(key,await restoreId(job.id,kind,value));return remapped.get(key)!; };
         const assetMap=new Map<string,string>();for(const item of manifest.documents?.assets||[])assetMap.set(item.data.id,await mapped('assets',item.data.id));
         const restoreBody=(body:string,note:string)=>{for(const match of body.matchAll(/asset:([a-f0-9-]{36})/gi)){if(!manifest.documents?.assets.some(a=>a.data.id===match[1]&&a.note===note))throw Error('Backup Markdown references an unavailable image.');}return rewriteAssetReferences(body,assetMap);};
@@ -405,6 +405,10 @@ export async function processRestoreJob(job: StoredImportJob): Promise<void> {
         for (let index=0;index<restored.subjects.length;index++)restored.subjects[index].id=await mapped('subjects',metadata.subjects[index].id);
         for (let index=0;index<restored.cards.length;index++){const card=restored.cards[index],raw=metadata.cards[index];card.id=await mapped('cards',raw.id);card.subject=await mapped('subjects',raw.subject);if(raw.note)card.note=await mapped('notes',raw.note);}
         for (let index=0;index<restored.events.length;index++){const event=restored.events[index],raw=metadata.events[index];event.id=await mapped('events',raw.id);event.card=await mapped('cards',raw.card);}
+        const originalQuizzes=new Map((metadata.quizzes||[]).map((q:any)=>[q.id,q]));
+        for(let i=0;i<(restored.quizzes||[]).length;i++){const q=restored.quizzes![i],raw=(metadata.quizzes||[])[i];q.id=await mapped('quizzes',raw.id);q.subject=raw.subject&&metadata.subjects.some((s:any)=>s.id===raw.subject)?await mapped('subjects',raw.subject):'';}
+        const rawAttempts=(metadata.quizAttempts||[]).filter((a:any)=>originalQuizzes.has(a.quiz));
+        for(let i=0;i<(restored.quizAttempts||[]).length;i++){const a=restored.quizAttempts![i],raw=rawAttempts[i];a.id=await mapped('quizAttempts',raw.id);a.quiz=await mapped('quizzes',raw.quiz);}
         let pending:D1PreparedStatement[]=[];let pendingBytes=0;
         const flush=async()=>{if(pending.length){await db.batch(pending);pending=[];pendingBytes=0;}};
         const stage=async(statement:D1PreparedStatement,bytes=0)=>{if(pending.length&&(pending.length>=32||pendingBytes+bytes>8*1024*1024))await flush();pending.push(statement);pendingBytes+=bytes;};
@@ -465,6 +469,7 @@ export async function processRestoreJob(job: StoredImportJob): Promise<void> {
             const current = await readSnapshot(job.workspace);
             const {notes:_notes,...next}=structuredClone(current.workspace);
             for (const kind of ['subjects', 'cards', 'events'] as const) (next[kind] as any[]).push(...restored[kind].filter(record => !next[kind].some(existing => existing.id === record.id)));
+            for(const kind of ['quizzes','quizAttempts'] as const){next[kind]||=[];next[kind]!.push(...(restored[kind]||[]).filter(r=>!next[kind]!.some(e=>e.id===r.id)) as any);}
             if (!current.workspace.notes.length && !current.workspace.cards.length && !current.workspace.subjects.length) {
                 if (Number.isInteger(metadata.limit) && metadata.limit >= 0 && metadata.limit <= 100) next.limit = metadata.limit;
                 if (typeof metadata.zone === 'string') { new Intl.DateTimeFormat('en', { timeZone: metadata.zone }); next.zone = metadata.zone; }

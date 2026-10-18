@@ -21,14 +21,14 @@ export async function cancelImport(workspace:string,id:string){const job=await g
 async function processDocument(job:StoredImportJob){
  await cleanupStaged(job.id);
  const value=await callConverter(job,'convert');const {result,base}=await stageRichResult(job,job.id,value);
- let markdown=result.markdown;const extension=job.name.split('.').pop()!.toLowerCase();if(['md','markdown'].includes(extension))markdown=parseMarkdownNote(job.name,markdown,false).body;
+ let markdown=result.markdown;const extension=job.name.split('.').pop()!.toLowerCase();const parsed=['md','markdown'].includes(extension)?parseMarkdownNote(job.name,markdown,false):undefined;if(parsed)markdown=parsed.body;
  validateNoteBody(markdown);if(!markdown.trim())throw new HttpError(400,'No readable text was found. Use another document.');
  const source:SourceRow={id:job.id,note:job.id,originalKey:job.originalKey,previewKey:base.object_key,name:job.name,mediaType:job.mediaType,size:job.size,previewType:'pdf',derivedPreview:extension!=='pdf',ocr:result.ocr};
  for(let attempt=0;attempt<5;attempt++){
   const active=await getImportJob(job.id);if(active.status!=='processing'||active.token!==job.token)return;
   const {workspace:w,version}=await readWorkspace(job.workspace);if(w.notes.some(n=>n.id===job.id))return;
   let subject=w.subjects.some(s=>s.id===job.subject)?job.subject:'';if(job.newSubject){let s=w.subjects.find(s=>s.name.toLocaleLowerCase()===job.newSubject.toLocaleLowerCase());if(!s){s={id:uid(),name:job.newSubject};w.subjects.push(s);}subject=s.id;}
-  const n:Note={id:job.id,subject,title:job.title,body:markdown,aliases:[],version:1,updated:new Date().toISOString(),conversion:result.conversion};w.notes.push(n);w.notes.forEach(n=>bindLinks(w,n));
+  const n:Note={id:job.id,subject,title:job.title,body:markdown,...(parsed?.tags?{tags:parsed.tags}:{}),aliases:[],version:1,updated:new Date().toISOString(),conversion:result.conversion};w.notes.push(n);w.notes.forEach(n=>bindLinks(w,n));
   try{await saveWorkspace(job.workspace,w,version,{sourceRows:[source],documentJob:{id:job.id,note:job.id},importJob:{id:job.id,token:job.token}});return;}catch(e){if(!(e instanceof HttpError&&e.status===409)||attempt===4)throw e;}
  }
 }

@@ -1,5 +1,6 @@
 import { createEmptyCard, fsrs, type Grade } from 'ts-fsrs';
 import type {DocumentAsset,ConversionInfo} from './documents';
+import type { Quiz, QuizAttempt } from './quiz.ts';
 export type Subject = {
     id: string;
     name: string;
@@ -23,6 +24,7 @@ export type Note = {
     source?: SourceFile;
     assets?: DocumentAsset[];
     conversion?: ConversionInfo;
+    tags?: string[];
 };
 export type SourceFile = { id: string; name: string; mediaType: string; size: number; preview: 'pdf' | 'text'; derivedPreview: boolean; ocr: boolean };
 export type NoteSummary = Omit<Note, 'body' | 'versions' | 'assets'> & { preview: string; linkTitles: string[]; versions?: { version: number; at: string }[] };
@@ -64,6 +66,9 @@ export type Workspace = {
     events: Event[];
     limit: number;
     zone: string;
+    /** Absent in workspaces created before quizzes existed. */
+    quizzes?: Quiz[];
+    quizAttempts?: QuizAttempt[];
 };
 export const empty = (): Workspace => ({ subjects: [], notes: [], cards: [], events: [], limit: 10, zone: 'UTC' });
 export const uid = () => crypto.randomUUID();
@@ -85,6 +90,21 @@ export function rate(w: Workspace, id: string, rating: number, eventId: string, 
 }
 export function changed(c: Card, w: StudyWorkspace) { const n = w.notes.find(n => n.id === c.note); return !!n && n.version !== c.sourceVersion; }
 export function links(body: string) { return [...body.replace(/```[\s\S]*?```|`[^`]*`/g, '').matchAll(/\[\[([^\]]+)\]\]/g)].map(m => m[1]); }
+// Tags are short labels without spaces or a leading '#'. Duplicates are dropped case-insensitively, keeping the first spelling.
+export const MAX_TAGS = 20, MAX_TAG_LENGTH = 40;
+export function normalizeTags(input: unknown): string[] {
+    const raw = Array.isArray(input) ? input : typeof input === 'string' ? input.split(',') : [];
+    const seen = new Set<string>(), tags: string[] = [];
+    for (const value of raw) {
+        if (typeof value !== 'string') continue;
+        const tag = value.trim().replace(/^#+/, '').replace(/[\s,]+/g, '-').replace(/^-+|-+$/g, '').slice(0, MAX_TAG_LENGTH);
+        if (tag && !seen.has(tag.toLowerCase()) && tags.length < MAX_TAGS) { seen.add(tag.toLowerCase()); tags.push(tag); }
+    }
+    return tags;
+}
+export const hasTag = (n: Pick<Note, 'tags'>, tag: string) => !!n.tags?.some(t => t.toLowerCase() === tag.toLowerCase());
+/** Every tag in use with its note count, merged case-insensitively and sorted by name. */
+export function allTags(w: Pick<StudyWorkspace, 'notes'>) { const counts = new Map<string, { tag: string; count: number }>(); for (const n of w.notes) for (const tag of n.tags || []) { const entry = counts.get(tag.toLowerCase()); if (entry) entry.count++; else counts.set(tag.toLowerCase(), { tag, count: 1 }); } return [...counts.values()].sort((a, b) => a.tag.localeCompare(b.tag, undefined, { sensitivity: 'base' })); }
 export function matches(w: StudyWorkspace, title: string, subject: string) { const found = w.notes.filter(n => n.title === title || n.aliases.includes(title)); const local = found.filter(n => n.subject === subject); return local.length ? local : found; }
 export function makeCard(n: Note | undefined, front: string, answer: string, excerpt = '', life: Card['life'] = 'draft'): Card { return { id: uid(), subject: n?.subject || '', note: n?.id, front, answer, type: 'basic', excerpt, sourceVersion: n?.version || 0, checked: true, life, schedule: createEmptyCard() }; }
 export function bindLinks(w: Workspace, n: Note) { n.bindings ||= {}; for (const title of linksForNote(n)) {

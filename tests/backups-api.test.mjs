@@ -1,10 +1,11 @@
+import {createSession} from './session.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {ZipReader,ZipWriter,Uint8ArrayReader,Uint8ArrayWriter} from '@zip.js/zip.js/lib/zip-core-native.js';
 
 const base=process.env.TEST_URL||'http://127.0.0.1:8787';
-async function guest(){const result=await fetch(base+'/api/workspace?zone=Australia%2FSydney');assert.equal(result.status,200);return{cookie:result.headers.get('set-cookie').split(';')[0]};}
+async function guest(){return createSession(base);}
 async function json(path,g,init={}){const result=await fetch(base+path,{...init,headers:{cookie:g.cookie,Origin:base,...init.headers}});const data=await result.json();assert.ok(result.ok,JSON.stringify({status:result.status,...data}));return data;}
 async function mutate(g,action,params){return json('/api/workspace',g,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,...params})});}
 async function waitJob(g,id){for(let attempt=0;attempt<180;attempt++){const {job}=await json('/api/note-imports/'+id,g);if(['ready','failed','cancelled'].includes(job.status))return job;await new Promise(resolve=>setTimeout(resolve,250));}throw Error('Background job did not finish.');}
@@ -65,3 +66,19 @@ const officeRestoredId=(await json('/api/workspace',officeTarget)).workspace.not
 const previewAfter=new Uint8Array(await(await fetch(base+'/api/notes/'+officeRestoredId+'/source?preview=1',{headers:{cookie:officeTarget.cookie}})).arrayBuffer());assert.deepEqual(previewAfter,previewBefore);
 const officeOriginalAfter=new Uint8Array(await(await fetch(base+'/api/notes/'+officeRestoredId+'/source',{headers:{cookie:officeTarget.cookie}})).arrayBuffer());assert.deepEqual(officeOriginalAfter,new Uint8Array(officeBytes));
 console.log('PASS: real DOCX original and its LibreOffice PDF preview both restore byte-for-byte with derived-preview metadata intact');
+
+const quizOwner=await guest(),quizTarget=await guest();
+const quizData=await mutate(quizOwner,'importQuizzes',{quizzes:[{title:'Backup quiz',subject:'Biology',questions:[{prompt:'Energy organelle?',options:['Nucleus','Mitochondrion'],correct:[1],accepted:[],explanation:'Respiration'}]}]});
+const sourceQuiz=quizData.workspace.quizzes[0];
+await mutate(quizOwner,'quizAttempt',{id:crypto.randomUUID(),quiz:sourceQuiz.id,mode:'test',seconds:3,answers:{[sourceQuiz.questions[0].id]:[1]}});
+const quizArchive=new Uint8Array(await(await fetch(base+'/api/backups',{headers:{cookie:quizOwner.cookie}})).arrayBuffer());
+const quizRestore=await restore(quizTarget,quizArchive);assert.equal(quizRestore.status,'ready',quizRestore.error);
+const quizWorkspace=(await json('/api/workspace',quizTarget)).workspace;
+assert.equal(quizWorkspace.quizzes.length,1);assert.equal(quizWorkspace.quizAttempts.length,1);
+assert.notEqual(quizWorkspace.quizzes[0].id,sourceQuiz.id);
+assert.notEqual(quizWorkspace.quizzes[0].subject,sourceQuiz.subject);
+assert.equal(quizWorkspace.quizzes[0].subject,quizWorkspace.subjects[0].id);
+assert.equal(quizWorkspace.quizAttempts[0].quiz,quizWorkspace.quizzes[0].id);
+assert.equal(quizWorkspace.quizAttempts[0].results[0].question,quizWorkspace.quizzes[0].questions[0].id);
+assert.equal(quizWorkspace.quizAttempts[0].score,1);
+console.log('PASS: ZIP v3 preserves quizzes, scores and question references with fresh account-owned identifiers');

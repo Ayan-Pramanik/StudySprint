@@ -1,3 +1,4 @@
+import {createSession} from './session.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {mkdtemp, readFile, rm} from 'node:fs/promises';
@@ -5,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-// This is an opt-in live suite. It creates fresh guest workspaces only.
+// This is an opt-in live suite. It creates fresh account workspaces only.
 // Run after starting the local app, queue consumer, converter and migrated DB:
 // node scripts/local-run.mjs tests/note-imports.test.mjs
 const base = (process.env.TEST_URL || 'http://127.0.0.1:8787').replace(/\/$/, '');
@@ -30,13 +31,12 @@ async function json(response, expected = 200) {
     return value;
 }
 async function guest() {
-    const response = await request(null, '/api/workspace');
-    const value = await json(response);
-    assert.ok(response.headers.get('set-cookie'), 'The guest workspace must set its own cookie');
-    assert.equal(value.workspace.notes.length, 0, 'Tests must start in a new, isolated guest workspace');
-    assert.equal(value.uploads, true, 'Configure the app, object bucket, queue and converter before running live imports');
-    return {cookie: response.headers.get('set-cookie').split(';')[0]};
+ const session=await createSession(base);
+ assert.equal(session.workspace.notes.length,0);
+ assert.equal(session.uploads,true,'Configure storage, queue and converter for live imports');
+ return session;
 }
+
 async function snapshot(guest) {
     const value = await json(await request(guest, '/api/workspace'));
     for (const note of value.workspace.notes) {
@@ -100,7 +100,7 @@ try {
         {name:'mixed.pdf', expected:['digital memory lecture', 'retrieval practice strengthens memory.', 'scanned study material', 'spaced repetition improves retention.'], ocr:true},
         {name:'lecture.docx', expected:['memory and learning', 'retrieval practice improves retention.'], derived:true},
         {name:'slides.pptx', expected:['retrieval practice', 'spaced repetition improves retention.'], derived:true},
-        {name:'note.md', derived:true, expected:['markdown memory lecture', 'tags: [memory, testing]', 'retrieval practice improves retention.']},
+        {name:'note.md', derived:true, tags:['memory','testing'], expected:['markdown memory lecture', 'retrieval practice improves retention.']},
         {name:'note.txt', derived:true, expected:['plain text memory lecture', 'retrieval practice improves retention.', 'café and déjà vu.']},
     ];
     const imported = [];
@@ -115,6 +115,7 @@ try {
         const note = await ready(owner, initial);
         assert.equal(note.title, title);
         assert.equal(typeof note.body, 'string');
+        if(fixture.tags)assert.deepEqual(note.tags,fixture.tags,'Markdown front matter tags must become note metadata');
         for (const passage of fixture.expected) assert.ok(normalized(note.body).includes(normalized(passage)), `${fixture.name}: missing expected source passage ${passage}`);
         assert.ok(note.source, `${fixture.name}: missing source metadata`);
         assert.equal(note.source.name, fixture.name);
@@ -239,7 +240,7 @@ try {
     for (const failedJob of [tooLargeJob, invalid, invalidText]) {
         await json(await request(owner, `/api/note-imports/${failedJob.id}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'cancel'})}));
     }
-    console.log('PASS: live document import suite completed in isolated guest workspaces');
+    console.log('PASS: live document import suite completed in isolated account workspaces');
 } finally {
     if (generated) await rm(fixtures, {recursive:true, force:true});
 }

@@ -71,3 +71,7 @@ test('force simulation separates notes, keeps linked notes near link distance, a
  assert.deepEqual([d.x,d.y],[400,400]);assert.equal(sim.running,false);
  sim.unpin('D');sim.reheat(.3);assert.ok(sim.running);
 });
+
+test('the tag filter keeps only tagged notes and the links between them',()=>{const w=empty();const note=(id,title,body,tags)=>({id,subject:'',title,body,aliases:[],version:1,updated:'',tags});w.notes.push(note('a','A','[[B]] [[C]]',['Exam']),note('b','B','',['exam','bio']),note('c','C','',undefined));w.notes.forEach(n=>bindLinks(w,n));const g=buildNoteGraph(w);
+const v=visibleGraph(g,{subject:'',tag:'EXAM',showIsolated:true,root:'',hops:1});assert.deepEqual(v.notes.map(n=>n.id),['a','b']);assert.deepEqual(v.relationships,[{source:'a',target:'b'}]);
+assert.deepEqual(visibleGraph(g,{subject:'',tag:'bio',showIsolated:false,root:'',hops:1}).notes,[]);assert.equal(visibleGraph(g,{subject:'',showIsolated:true,root:'',hops:1}).notes.length,3);});

@@ -1,10 +1,14 @@
 import { env } from 'cloudflare:workers';
-import { uid, rate, bindLinks, makeCard, validateNoteBody, type Workspace } from '../../../lib/study';
+import { uid, rate, bindLinks, makeCard, normalizeTags, validateNoteBody, type Workspace } from '../../../lib/study';
 import { ensureWorkspace,requireWorkspaceId,readWorkspace,readSnapshot,readNote,digest,saveWorkspace,checkOrigin,errorResponse } from '../../../lib/server/workspace-store';
 import { z } from 'zod';
 import { importBackup } from '../../../lib/backup';
 import { importMarkdownNotes } from '../../../lib/markdown-notes';
+import { importCards } from '../../../lib/card-import';
+import { importQuizzes, recordAttempt } from '../../../lib/quiz';
 import { clozeDrafts } from '../../../lib/generation';
+
+
 async function aiFetch(url: string, init: RequestInit) { let response: Response | undefined; for (let attempt = 0; attempt < 2; attempt++) {
     response = await fetch(url, { ...init, signal: AbortSignal.timeout(25000) });
     if (response.status !== 429 && response.status < 500)
@@ -13,7 +17,7 @@ async function aiFetch(url: string, init: RequestInit) { let response: Response 
         await new Promise(r => setTimeout(r, 500));
 } return response!; }
 const json = (data: unknown, status = 200, cookie?: string) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...(cookie ? { 'Set-Cookie': cookie } : {}) } });
-export async function GET(req: Request) { try { const {id,cookie}=await ensureWorkspace(req);const {workspace,version}=await readSnapshot(id);return json({workspace,version,ai:!!env.AI_API_KEY,uploads:!!(env.BUCKET&&env.IMPORT_QUEUE&&env.CONVERTER_URL&&env.CONVERTER_SECRET)},200,cookie); } catch(e){return errorResponse(e);} }
+export async function GET(req: Request) { try { const {id,user}=await ensureWorkspace(req);const {workspace,version}=await readSnapshot(id);return json({workspace,version,ai:!!env.AI_API_KEY,uploads:!!(env.BUCKET&&env.IMPORT_QUEUE&&env.CONVERTER_URL&&env.CONVERTER_SECRET),user}); } catch(e){return errorResponse(e);} }
 export async function POST(req: Request) {
     try {
         checkOrigin(req);
@@ -40,6 +44,22 @@ export async function POST(req: Request) {
         }
         else if(action === 'import') { importBackup(w,p.backup); }
         else if (action === 'importNotes') { result = importMarkdownNotes(w, p); }
+        else if (action === 'importCards') { result = importCards(w, p); }
+        else if (action === 'importQuizzes') { result = importQuizzes(w, p); }
+        else if (action === 'quizAttempt') { result = recordAttempt(w, p); }
+        else if (action === 'quiz') {
+            const q = w.quizzes?.find(q => q.id === p.id);
+            if (!q)
+                throw Error('Quiz unavailable');
+            if (p.subject && !w.subjects.some(s => s.id === p.subject))
+                throw Error('Subject unavailable');
+            Object.assign(q, { title: name(p.title), subject: p.subject || '', updated: new Date().toISOString() });
+        }
+        else if (action === 'deleteQuiz') {
+            w.quizzes = (w.quizzes || []).filter(q => q.id !== p.id);
+            // Its attempts go too: they cannot be reviewed without the questions.
+            w.quizAttempts = (w.quizAttempts || []).filter(a => a.quiz !== p.id);
+        }
         else if (action === 'subject') {
             if (p.id) {
                 const s = w.subjects.find(s => s.id === p.id);
@@ -57,13 +77,16 @@ export async function POST(req: Request) {
                 n.subject = ''; });
             w.cards.forEach(c => { if (c.subject === p.id)
                 c.subject = ''; });
+            w.quizzes?.forEach(q => { if (q.subject === p.id)
+                q.subject = ''; });
         }
         else if (action === 'note') {
             if (!p.id && p.newSubject) { const subject = {id:uid(),name:name(p.newSubject,100)};w.subjects.push(subject);p.subject=subject.id;}
             p.subject ||= '';
             if (p.subject && !w.subjects.some(s => s.id === p.subject))
                 throw Error('Subject unavailable');
-            if (p.id) {
+            // `create` carries a client-made id (notes written offline); replaying it after a lost response updates the note instead.
+            if (p.id && (!p.create || w.notes.some(n => n.id === p.id))) {
                 const n = note();
                 if(p.expectedUpdated && p.expectedUpdated !== n.updated) throw Error("This note changed in another tab. Your unsaved text is preserved; reload the saved note before retrying.");
                 if (n.title !== p.title)
@@ -74,10 +97,10 @@ export async function POST(req: Request) {
                     n.version++;
                 }
                 w.cards.filter(c=>c.note===n.id).forEach(c=>c.subject=p.subject);
-                Object.assign(n, { title: name(p.title), body: validateNoteBody(str(p.body,1048576)), subject: p.subject, updated: new Date().toISOString() });
+                Object.assign(n, { title: name(p.title), body: validateNoteBody(str(p.body,1048576)), subject: p.subject, ...(p.tags !== undefined ? {tags:normalizeTags(p.tags)} : {}), updated: new Date().toISOString() });
             }
             else
-                w.notes.push({ id: uid(), title: name(p.title), body: validateNoteBody(str(p.body,1048576)), subject: p.subject, aliases: [], version: 1, updated: new Date().toISOString() });
+                w.notes.push({ id: p.create ? z.string().uuid().parse(p.id) : uid(), tags:normalizeTags(p.tags), title: name(p.title), body: validateNoteBody(str(p.body,1048576)), subject: p.subject, aliases: [], version: 1, updated: new Date().toISOString() });
         }
         else if (action === 'moveNote') {
             // Moves a note and its cards to another subject ('' = no subject). `updated` is left alone so an open editor's autosave stays valid.

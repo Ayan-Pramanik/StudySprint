@@ -3,7 +3,7 @@ import {useEffect,useMemo,useRef,useState} from 'react';
 import LayoutWorker from './layout.worker?worker';
 import type {Core,Position,ElementDefinition,EventObject,StylesheetJson} from 'cytoscape';
 import {Network,Search,Plus,Minus,Maximize,RotateCcw,ArrowRight,BookOpen,X,SlidersHorizontal} from 'lucide-react';
-import {type WorkspaceSnapshot,type LinkedNote,type NoteSummary,notePreview} from '../../lib/study';
+import {allTags,type WorkspaceSnapshot,type LinkedNote,type NoteSummary,notePreview} from '../../lib/study';
 import {buildNoteGraph,visibleGraph,visualConnections,isUncategorised,UNCATEGORISED} from '../../lib/note-graph';
 import {type Theme,useTheme} from '../../lib/theme';
 import {ForceSimulation,defaultForces,type ForceSettings} from '../../lib/graph-forces';
@@ -24,7 +24,7 @@ function graphStyle(theme:Theme):StylesheetJson{const dark=theme==='dark';return
      {selector:'node.chosen',style:{'border-width':5,'border-color':dark?'#e4e2ff':'#26215e','background-color':'#b6b1f0','font-weight':'bold'}}
  ];}
 export default function NoteGraphView({workspace,active,focusRequest,openNote,createNote,follow}:Props){
- const [subject,setSubject]=useState(''),[showIsolated,setShowIsolated]=useState(true),[root,setRoot]=useState(''),[hops,setHops]=useState<1|2>(1);
+ const [subject,setSubject]=useState(''),[tag,setTag]=useState(''),[showIsolated,setShowIsolated]=useState(true),[root,setRoot]=useState(''),[hops,setHops]=useState<1|2>(1);
  const [query,setQuery]=useState(''),[selected,setSelected]=useState(''),[hovered,setHovered]=useState(''),[view,setView]=useState<'graph'|'list'>('graph');
  const [arranging,setArranging]=useState(false);
  const [detailsOpen,setDetailsOpen]=useState(true);
@@ -51,7 +51,10 @@ export default function NoteGraphView({workspace,active,focusRequest,openNote,cr
  const selectRef=useRef((id:string)=>{});selectRef.current=id=>{setSelected(id);setHovered('');setDetailsOpen(true);};
  // Review-clock ticks and selection changes do not rebuild the graph.
  const graph=useMemo(()=>buildNoteGraph(workspace),[workspace.notes,workspace.subjects]);
- const visible=useMemo(()=>visibleGraph(graph,{subject,showIsolated,root,hops}),[graph,subject,showIsolated,root,hops]);
+ const visible=useMemo(()=>visibleGraph(graph,{subject,tag,showIsolated,root,hops}),[graph,subject,tag,showIsolated,root,hops]);
+ const tagList=useMemo(()=>allTags(workspace),[workspace.notes]);
+ // A tag removed from its last note drops out of the filter.
+ useEffect(()=>{if(tag&&!tagList.some(t=>t.tag.toLowerCase()===tag.toLowerCase()))setTag('');},[tag,tagList]);
  const visibleIds=useMemo(()=>new Set(visible.notes.map(n=>n.id)),[visible.notes]);
  const byId=useMemo(()=>new Map(workspace.notes.map(n=>[n.id,n])),[workspace.notes]);
  const subjectStyle=useMemo(()=>new Map(workspace.subjects.map((s,i)=>[s.id,{...s,color:palette[i%palette.length],shape:shapes[i%shapes.length]}])),[workspace.subjects]);
@@ -121,25 +124,26 @@ export default function NoteGraphView({workspace,active,focusRequest,openNote,cr
  useEffect(()=>{const cy=cyRef.current;if(ready&&cy)cy.style(graphStyle(theme));},[ready,theme]);
  useEffect(()=>{const cy=cyRef.current;if(ready&&cy)applyHighlight(cy,hovered||selected,selected);},[ready,selected,hovered,elements]);
  useEffect(()=>{const cy=cyRef.current;if(!ready||!cy||!active||view!=='graph'||!locate)return;const node=cy.getElementById(selected);if(node.length){cy.zoom(Math.max(.9,Math.min(cy.zoom(),1.5)));cy.center(node);}},[ready,active,view,locate,selected,elements]);
- function pick(id:string,reveal=false){if(reveal){setSubject('');setShowIsolated(true);setRoot('');}setSelected(id);setHovered('');setDetailsOpen(true);setLocate(v=>v+1);}
+ function pick(id:string,reveal=false){if(reveal){setSubject('');setTag('');setShowIsolated(true);setRoot('');}setSelected(id);setHovered('');setDetailsOpen(true);setLocate(v=>v+1);}
  function local(id:string){setRoot(id);setSubject('');setShowIsolated(true);setSelected(id);setDetailsOpen(true);setLocate(v=>v+1);}
- function clearFilters(){setSubject('');setRoot('');setShowIsolated(true);setQuery('');}
+ function clearFilters(){setSubject('');setTag('');setRoot('');setShowIsolated(true);setQuery('');}
  function neighbours(ids:string[]|undefined){return (ids||[]).map(id=>byId.get(id)).filter((n):n is NoteSummary=>!!n);}
  const incoming=neighbours(graph.incoming.get(selected)),outgoing=neighbours(graph.outgoing.get(selected));
  return <section className="note-graph-view" aria-label="Note graph">
   <div className="graph-filters">
    <label>Find a note<div className="search"><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search by title…" aria-label="Search graph notes"/></div></label>
    <label>Subject<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">All subjects</option>{workspace.subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}{hasUncategorised&&<option value={UNCATEGORISED}>Uncategorised</option>}</select></label>
+   {tagList.length>0&&<label>Tag<select value={tag} onChange={e=>setTag(e.target.value)}><option value="">All tags</option>{tagList.map(t=><option key={t.tag} value={t.tag}>#{t.tag} ({t.count})</option>)}</select></label>}
    <label className="checkbox"><input type="checkbox" checked={showIsolated} onChange={e=>setShowIsolated(e.target.checked)}/>Show isolated notes</label>
    <div className="segmented" aria-label="Graph presentation"><button aria-pressed={view==='graph'} onClick={()=>setView('graph')}>Graph</button><button aria-pressed={view==='list'} onClick={()=>setView('list')}>Accessible list</button></div>
   </div>
   {query.trim()&&<section className="graph-search-results" aria-label="Search results"><p role="status">{results.length} matching {results.length===1?'note':'notes'}</p>{results.length?results.slice(0,100).map(n=><button key={n.id} onFocus={()=>setHovered(n.id)} onBlur={()=>setHovered('')} onClick={()=>pick(n.id,!visibleIds.has(n.id))}><span>{n.title}<small>{styleOf(n).name}</small></span><span>{visibleIds.has(n.id)?'Locate':'Reveal in global graph'} <ArrowRight size={14}/></span></button>):<p>No title matches. Try a shorter search.</p>}{results.length>100&&<p>Narrow your search to see more specific results.</p>}</section>}
   <div className="graph-status row"><div><span className="pill">{root?`Local · ${localRoot?.title||'Note unavailable'}`:'Global · all notes'}</span>{root&&<><label className="graph-hop-label">Distance<select aria-label="Local graph distance" value={hops} onChange={e=>setHops(Number(e.target.value) as 1|2)}><option value="1">One hop</option><option value="2">Two hops</option></select></label><button className="text-button" onClick={()=>setRoot('')}>Show global graph</button></>}</div><span aria-live="polite">{visible.notes.length} notes · {visible.relationships.length} directed connections</span></div>
-  {subject&&<p className="small muted">Connections to hidden subjects are not displayed. Isolated means no connections within the current filters.</p>}
+  {(subject||tag)&&<p className="small muted">Connections to notes hidden by these filters are not displayed. Isolated means no connections within the current filters.</p>}
   <div className="graph-legend" aria-label="Subject legend">{workspace.subjects.map(s=><span key={s.id}><i style={{background:subjectStyle.get(s.id)?.color}}/>{s.name}<small>({subjectStyle.get(s.id)?.shape})</small></span>)}{hasUncategorised&&<span><i style={{background:uncategorisedStyle.color}}/>{uncategorisedStyle.name}<small>({uncategorisedStyle.shape})</small></span>}<span className="graph-arrow-key">A → B: A links to B · A ↔ B: both link explicitly</span></div>
   {!workspace.notes.length&&<div className="empty"><Network size={32}/><h2>Your ideas will meet here.</h2><p>Create a note, then connect it with [[Note Title]].</p><button className="primary" onClick={createNote}>Create note</button></div>}
   {!!workspace.notes.length&&!graph.relationships.length&&<p className="graph-guidance">Your notes have no resolved links yet. Write [[Note Title]] in a note to connect it to another existing note.</p>}
-  {!!workspace.notes.length&&!visible.notes.length&&<div className="empty"><h2>No notes match these filters.</h2><p>Try another subject, include isolated notes, or return to the global view.</p><button onClick={clearFilters}>Reset filters</button></div>}
+  {!!workspace.notes.length&&!visible.notes.length&&<div className="empty"><h2>No notes match these filters.</h2><p>Try another subject or tag, include isolated notes, or return to the global view.</p><button onClick={clearFilters}>Reset filters</button></div>}
   <div className="graph-layout">
    <div className="graph-main">
     <div hidden={view!=='graph'||!workspace.notes.length||!visible.notes.length}>
@@ -152,7 +156,7 @@ export default function NoteGraphView({workspace,active,focusRequest,openNote,cr
      {visible.notes.map(n=><article key={n.id} className={selected===n.id?'selected':''}><button className="graph-list-title" onFocus={()=>setHovered(n.id)} onBlur={()=>setHovered('')} aria-pressed={selected===n.id} onClick={()=>pick(n.id)}>{n.title}</button><p>{styleOf(n).name}</p><div><strong>Outgoing → </strong>{neighbours(graph.outgoing.get(n.id)).length?neighbours(graph.outgoing.get(n.id)).map(other=><button key={other.id} onClick={()=>pick(other.id,!visibleIds.has(other.id))}>{other.title}{!visibleIds.has(other.id)?' (reveal)':''}</button>):<span>None</span>}</div><div><strong>Incoming ← </strong>{neighbours(graph.incoming.get(n.id)).length?neighbours(graph.incoming.get(n.id)).map(other=><button key={other.id} onClick={()=>pick(other.id,!visibleIds.has(other.id))}>{other.title}{!visibleIds.has(other.id)?' (reveal)':''}</button>):<span>None</span>}</div><div className="actions"><button onClick={()=>{setSelected(n.id);openNote(n.id);}}>Open note</button><button onClick={()=>local(n.id)}>Focus local graph</button></div></article>)}
     </section>
    </div>
-   {chosen?<aside className={`graph-details ${detailsOpen?'':'collapsed'}`} aria-label="Selected note details"><div className="row"><span className="eyebrow">SELECTED NOTE</span><button className="icon" aria-label="Clear graph selection" onClick={()=>setSelected('')}><X size={18}/></button></div><h2>{chosen.title}</h2><button className="graph-details-toggle" aria-expanded={detailsOpen} onClick={()=>setDetailsOpen(v=>!v)}>{detailsOpen?'Collapse details':'Expand details'}</button><div className="graph-details-body"><span className="pill">{styleOf(chosen).name}</span><p className="graph-preview">{notePreview(chosen)||'This note has no text yet.'}</p>{!visibleIds.has(chosen.id)&&<button className="full" onClick={()=>pick(chosen.id,true)}>Reveal selected note in global graph</button>}<div className="actions"><button className="primary" onClick={()=>openNote(chosen.id)}><BookOpen size={15}/>Open note</button><button onClick={()=>local(chosen.id)}>Focus local graph</button></div><h3>Outgoing links → <span className="number">{outgoing.length}</span></h3><ConnectionList notes={outgoing} visibleIds={visibleIds} pick={pick}/><h3>Incoming links / backlinks ← <span className="number">{incoming.length}</span></h3><ConnectionList notes={incoming} visibleIds={visibleIds} pick={pick}/>{!!graph.unresolved.get(chosen.id)?.length&&<><h3>Unresolved links</h3>{graph.unresolved.get(chosen.id)!.map(link=><button className="graph-unresolved" key={link.title} onClick={()=>follow(link.title,chosen)}>{link.title}<small>{link.ambiguous?'Choose intended note':'Create note'}</small></button>)}</>}</div></aside>:<aside className="graph-details graph-details-empty"><Network size={28}/><h2>Follow a connection.</h2><p>Select a node or a note in the accessible list to see its source links and backlinks.</p></aside>}
+   {chosen?<aside className={`graph-details ${detailsOpen?'':'collapsed'}`} aria-label="Selected note details"><div className="row"><span className="eyebrow">SELECTED NOTE</span><button className="icon" aria-label="Clear graph selection" onClick={()=>setSelected('')}><X size={18}/></button></div><h2>{chosen.title}</h2><button className="graph-details-toggle" aria-expanded={detailsOpen} onClick={()=>setDetailsOpen(v=>!v)}>{detailsOpen?'Collapse details':'Expand details'}</button><div className="graph-details-body"><span className="pill">{styleOf(chosen).name}</span>{!!chosen.tags?.length&&<div className="tag-list" aria-label="Tags">{chosen.tags.map(t=><button key={t} className="tag-chip" title={`Show only notes tagged #${t}`} onClick={()=>setTag(t)}>#{t}</button>)}</div>}<p className="graph-preview">{notePreview(chosen)||'This note has no text yet.'}</p>{!visibleIds.has(chosen.id)&&<button className="full" onClick={()=>pick(chosen.id,true)}>Reveal selected note in global graph</button>}<div className="actions"><button className="primary" onClick={()=>openNote(chosen.id)}><BookOpen size={15}/>Open note</button><button onClick={()=>local(chosen.id)}>Focus local graph</button></div><h3>Outgoing links → <span className="number">{outgoing.length}</span></h3><ConnectionList notes={outgoing} visibleIds={visibleIds} pick={pick}/><h3>Incoming links / backlinks ← <span className="number">{incoming.length}</span></h3><ConnectionList notes={incoming} visibleIds={visibleIds} pick={pick}/>{!!graph.unresolved.get(chosen.id)?.length&&<><h3>Unresolved links</h3>{graph.unresolved.get(chosen.id)!.map(link=><button className="graph-unresolved" key={link.title} onClick={()=>follow(link.title,chosen)}>{link.title}<small>{link.ambiguous?'Choose intended note':'Create note'}</small></button>)}</>}</div></aside>:<aside className="graph-details graph-details-empty"><Network size={28}/><h2>Follow a connection.</h2><p>Select a node or a note in the accessible list to see its source links and backlinks.</p></aside>}
   </div>
  </section>;
 }
