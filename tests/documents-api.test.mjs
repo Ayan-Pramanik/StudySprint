@@ -1,8 +1,9 @@
+import {createSession} from './session.mjs';
 import assert from 'node:assert/strict';
 import {ZipReader,ZipWriter,Uint8ArrayReader,Uint8ArrayWriter,TextReader} from '@zip.js/zip.js/lib/zip-core-native.js';
 import {writeFile} from 'node:fs/promises';
 const base=process.env.TEST_URL||'http://127.0.0.1:8787';
-async function guest(){const r=await fetch(base+'/api/workspace');return{cookie:r.headers.get('set-cookie').split(';')[0]};}
+async function guest(){return createSession(base);}
 async function req(g,path,init={}){return fetch(base+path,{...init,headers:{cookie:g.cookie,Origin:base,...init.headers}});}
 async function json(g,path,init={},status=200){const r=await req(g,path,init),d=await r.json();assert.equal(r.status,status,JSON.stringify(d));return d;}
 const post=(value)=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});

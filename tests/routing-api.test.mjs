@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import {createSession} from './session.mjs';
 const base=process.env.TEST_URL||'http://127.0.0.1:8787';
-for(const path of ['/','/focus','/notes','/graph','/cards','/review','/progress','/settings','/notes/missing']){
+for(const path of ['/','/focus','/notes','/graph','/cards','/review','/quiz','/insights','/progress','/settings','/notes/missing']){
  const response=await fetch(base+path);assert.equal(response.status,200,path);assert.match(response.headers.get('content-type'),/text\/html/);
 }
 assert.equal((await fetch(base+'/unknown-route')).status,404);
-async function guest(){const r=await fetch(base+'/api/workspace');assert.equal(r.status,200);return r.headers.get('set-cookie').split(';')[0];}
+async function guest(){return (await createSession(base)).cookie;}
 const owner=await guest(),other=await guest();
 async function post(params){const r=await fetch(base+'/api/workspace',{method:'POST',headers:{cookie:owner,Origin:base,'Content-Type':'application/json'},body:JSON.stringify(params)});const d=await r.json();assert.equal(r.status,200,JSON.stringify(d));return d.workspace;}
 let w=await post({action:'note',title:'Stable route',body:'Synthetic route identity test.',newSubject:'First folder'});
@@ -20,4 +21,4 @@ assert.equal((await fetch(base+'/api/notes/'+encodeURIComponent(original.id),{he
 assert.equal((await fetch(base+'/api/notes/missing',{headers:{cookie:owner}})).status,404);
 w=await post({action:'deleteNote',id:original.id});assert.equal(w.notes.length,0);
 assert.equal((await fetch(base+'/api/notes/'+encodeURIComponent(original.id),{headers:{cookie:owner}})).status,404);
-console.log('PASS: every direct screen route, unknown-route 404, stable note identity across rename/move, guest isolation and deleted-note rejection');
+console.log('PASS: every direct screen route, unknown-route 404, stable note identity across rename/move, account isolation and deleted-note rejection');

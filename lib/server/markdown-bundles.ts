@@ -38,7 +38,7 @@ export async function processMarkdownArchive(job:StoredImportJob){
    }
    if(new TextEncoder().encode(body).length>1024*1024)throw Error('A note exceeds 1 MiB after resolving images.');
    const fallback=String(job.payload.newSubject||'');const subject=parsed.subject?subjectId(parsed.subject):fallback?subjectId(fallback):(initial.workspace.subjects.some(s=>s.id===job.payload.subject)?String(job.payload.subject):'');
-   const note:Note={id,title:parsed.title,body,subject,aliases:[],version:1,updated:new Date().toISOString(),conversion:{engine:'studysprint-markdown-bundle-1',warnings}};restored.notes.push(note);
+   const note:Note={id,title:parsed.title,body,subject,...(parsed.tags?{tags:parsed.tags}:{}),aliases:[],version:1,updated:new Date().toISOString(),conversion:{engine:'studysprint-markdown-bundle-1',warnings}};restored.notes.push(note);
    const {notePreview,links}=await import('../study');const {body:_,versions:__,...record}=note,data=JSON.stringify({...record,preview:notePreview(note),linkTitles:[...new Set(links(body))],bodyHash:await digest(body)});
    await db.batch([db.prepare('INSERT INTO restore_notes(job,workspace,id,data,body,hash) VALUES(?,?,?,?,?,?)').bind(job.id,job.workspace,id,data,body,await digest(data+'\n'+body)),db.prepare('INSERT OR REPLACE INTO note_search(workspace,id,content) VALUES(?,?,?)').bind(job.workspace,id,(note.title+' '+body).toLowerCase())]);
   }

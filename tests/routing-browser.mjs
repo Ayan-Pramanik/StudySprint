@@ -1,9 +1,9 @@
 /**
  * Browser regression scenarios. Accept a Codex browser Tab (cua_repl), or an
  * adapter exposing goto/reload/back/forward and a Playwright locator API.
- * Run against an isolated local database, never an existing user's workspace.
+ * Run against an isolated local database, never an existing user's workspace. Sign in to a synthetic test account before running.
  */
-const screens=[['/','Today'],['/focus','Focus'],['/notes','Notes'],['/graph','Graph'],['/cards','Cards'],['/review','Review'],['/progress','Progress'],['/settings','Settings']];
+const screens=[['/','Today'],['/focus','Focus'],['/notes','Notes'],['/graph','Graph'],['/cards','Cards'],['/review','Review'],['/quiz','Quiz'],['/insights','Insights'],['/progress','Progress'],['/settings','Settings']];
 function check(value,message){if(!value)throw Error(message);}
 export async function assertPath(tab,path){
  const actual=await tab.playwright.evaluate(()=>document.location.pathname);

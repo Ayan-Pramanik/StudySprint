@@ -1,6 +1,6 @@
 export const sectionPaths = {
     Today: '/', Focus: '/focus', Notes: '/notes', Graph: '/graph',
-    Cards: '/cards', Review: '/review', Progress: '/progress', Settings: '/settings',
+    Cards: '/cards', Quiz: '/quiz', Insights: '/insights', Review: '/review', Progress: '/progress', Settings: '/settings',
 } as const;
 export type WorkspaceSection = keyof typeof sectionPaths;
 export type WorkspaceRoute = { section: WorkspaceSection; noteId?: string };

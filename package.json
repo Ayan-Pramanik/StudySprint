@@ -30,6 +30,8 @@
     "test:queue": "node scripts/local-run.mjs tests/import-queue.test.mjs",
     "test:annotations": "node scripts/local-run.mjs tests/annotations.test.mjs",
     "test:documents-api": "node scripts/local-run.mjs tests/documents-api.test.mjs",
+    "test:offline": "node scripts/local-run.mjs --experimental-strip-types tests/offline.test.mjs",
+    "test:markdown-images": "node scripts/local-run.mjs --experimental-strip-types tests/markdown-images.test.mjs",
     "test:routing": "node scripts/local-run.mjs --experimental-strip-types tests/routing.test.mjs",
     "test:routing-api": "node scripts/local-run.mjs tests/routing-api.test.mjs"
   },

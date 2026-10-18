@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type DragEvent } from 'react';
-import { ArrowDownAZ, ChevronRight, ChevronsDownUp, ChevronsUpDown, Clock, FileText, FolderPlus, Plus, Search, SquarePen } from 'lucide-react';
+import { ArrowDownAZ, ChevronRight, ChevronsDownUp, ChevronsUpDown, Clock, Download, FileText, FolderPlus, Plus, Search, SquarePen, Upload } from 'lucide-react';
 import type { NoteSummary, WorkspaceSnapshot } from '../lib/study';
 import { UNCATEGORISED } from '../lib/note-graph';
 import { NoteLink } from './NoteLink';
@@ -17,6 +17,9 @@ type Props = {
     onFolder: (id: string) => void;
     onNewNote: (subject: string) => void;
     onNewFolder: () => void;
+    onImport: () => void;
+    /** Exports the active folder's notes, or every note when no folder is active; absent when there is nothing to export. */
+    onExport?: () => void;
     /** Drop a note on a folder (subject id) or on the root (''). */
     onMove: (note: NoteSummary, subject: string) => void;
 };
@@ -33,7 +36,7 @@ function savePrefs(collapsed: Set<string>, sort: Sort) { try { localStorage.setI
 const byName = (a: { name?: string; title?: string }, b: { name?: string; title?: string }) => (a.name ?? a.title ?? '').localeCompare(b.name ?? b.title ?? '', undefined, { numeric: true, sensitivity: 'base' });
 
 /** Folder view of the notes: subjects are folders, notes without a subject sit at the root. */
-export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFolder, onNewNote, onNewFolder, onMove }: Props) {
+export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFolder, onNewNote, onNewFolder, onImport, onExport, onMove }: Props) {
     const [prefs] = useState(readPrefs);
     const [collapsed, setCollapsed] = useState(() => new Set(prefs.collapsed));
     const [sort, setSort] = useState<Sort>(prefs.sort);
@@ -50,9 +53,9 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
     const q = search.trim().toLowerCase();
     const [searchResult,setSearchResult]=useState<{query:string;ids:Set<string>}>({query:'',ids:new Set()});
     const [searchError,setSearchError]=useState('');
-    useEffect(()=>{if(!q){setSearchError('');return;}const controller=new AbortController();setSearchError('');const timer=setTimeout(()=>{fetch('/api/notes/search?q='+encodeURIComponent(q),{signal:controller.signal}).then(async r=>{const data=await r.json() as {ids:string[];error?:string};if(!r.ok)throw Error(data.error||'Search could not load.');setSearchResult({query:q,ids:new Set(data.ids)});}).catch(e=>{if(e.name!=='AbortError')setSearchError(e.message);});},200);return()=>{clearTimeout(timer);controller.abort();};},[q,w.notes]);
-    const searching=!!q&&searchResult.query!==q&&!searchError;
-    const matches = (n: NoteSummary) => !q || n.title.toLowerCase().includes(q) || (searchResult.query===q&&searchResult.ids.has(n.id));
+    useEffect(()=>{if(!q||q.startsWith('#')){setSearchError('');return;}const controller=new AbortController();setSearchError('');const timer=setTimeout(()=>{fetch('/api/notes/search?q='+encodeURIComponent(q),{signal:controller.signal}).then(async r=>{const data=await r.json() as {ids:string[];error?:string};if(!r.ok)throw Error(data.error||'Search could not load.');setSearchResult({query:q,ids:new Set(data.ids)});}).catch(e=>{if(e.name!=='AbortError')setSearchError(e.message);});},200);return()=>{clearTimeout(timer);controller.abort();};},[q,w.notes]);
+    const searching=!!q&&!q.startsWith('#')&&searchResult.query!==q&&!searchError;
+    const matches = (n: NoteSummary) => !q || (q.startsWith('#')&&q.length>1 ? !!n.tags?.some(t=>t.toLowerCase().startsWith(q.slice(1))) : n.title.toLowerCase().includes(q)||!!n.tags?.some(t=>t.toLowerCase().includes(q))||(searchResult.query===q&&searchResult.ids.has(n.id)));
     const order = (notes: NoteSummary[]) => [...notes].sort(sort === 'name' ? byName : (a, b) => b.updated.localeCompare(a.updated));
     const known = new Set(w.subjects.map(s => s.id));
     const folders = [...w.subjects].sort(byName).map(s => ({ ...s, notes: order(w.notes.filter(n => n.subject === s.id && matches(n))), total: w.notes.filter(n => n.subject === s.id).length }));
@@ -98,6 +101,8 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
             <button className="icon" onClick={onNewFolder} aria-label="New folder" title="New folder"><FolderPlus size={16}/></button>
             <button className="icon" onClick={() => update(collapsed, sort === 'name' ? 'updated' : 'name')} aria-label={sort === 'name' ? 'Sorted by name. Sort by last edited' : 'Sorted by last edited. Sort by name'} title={sort === 'name' ? 'Sorted A–Z' : 'Sorted by last edited'}>{sort === 'name' ? <ArrowDownAZ size={16}/> : <Clock size={16}/>}</button>
             <button className="icon" disabled={!folders.length} onClick={() => update(allCollapsed ? new Set() : new Set(folders.map(f => f.id)))} aria-label={allCollapsed ? 'Expand all folders' : 'Collapse all folders'} title={allCollapsed ? 'Expand all' : 'Collapse all'}>{allCollapsed ? <ChevronsUpDown size={16}/> : <ChevronsDownUp size={16}/>}</button>
+            <button className="icon" onClick={onImport} aria-label="Import Markdown notes" title="Import Markdown"><Upload size={16}/></button>
+            <button className="icon" disabled={!onExport} onClick={onExport} aria-label={folder ? 'Export this folder as .zip' : 'Export all notes as .zip'} title={folder ? 'Export folder (.zip)' : 'Export all (.zip)'}><Download size={16}/></button>
         </div>
         <label className="search"><Search size={16}/><input aria-label="Search notes" maxLength={200} placeholder="Find a note…" value={search} onChange={e => onSearch(e.target.value)}/></label>
         <ul className={'tree' + (dropTarget === ROOT ? ' drop-target' : '')} {...dropProps(ROOT)}>
