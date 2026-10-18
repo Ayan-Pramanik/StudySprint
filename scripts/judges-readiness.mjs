@@ -1,18 +1,20 @@
 export async function workspaceReady(base, { publicCheck = false, browserOrigin, fetcher = fetch } = {}) {
   const headers = { 'ngrok-skip-browser-warning': 'studysprint-readiness' };
-  const response = await fetcher(base + '/api/workspace', { headers, signal: AbortSignal.timeout(5000) });
+  const origin = browserOrigin ?? new URL(base).origin;
+  const login = await fetcher(base + '/api/auth/signup', { method: 'POST', headers: {...headers, Origin:origin, 'Content-Type':'application/json'}, body:JSON.stringify({email:`readiness-${crypto.randomUUID()}@example.invalid`,name:'Readiness check',password:crypto.randomUUID()}), signal:AbortSignal.timeout(5000) });
+  if(!login.ok)return false;
+  const cookie=login.headers.get('set-cookie');
+  if(!cookie)return false;
+  const guest={...headers,cookie:cookie.split(';')[0]};
+  const response = await fetcher(base + '/api/workspace', { headers:guest, signal:AbortSignal.timeout(5000) });
   if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) return false;
-  const data = await response.json();
-  if (!data.workspace || !Number.isInteger(data.version)) return false;
-  const cookie = response.headers.get('set-cookie');
-  if (!cookie) return false;
-  const guest = { ...headers, cookie: cookie.split(';')[0] };
+  const data=await response.json();
+  if(!data.workspace||!Number.isInteger(data.version))return false;
   const status = await fetcher(base + '/api/dictation/status', { headers: guest, signal: AbortSignal.timeout(5000) });
   if (!status.ok || (await status.json()).available !== true) return false;
-  if (publicCheck && !cookie.includes('; Secure')) throw Error('The public URL did not receive a Secure guest cookie. Check PUBLIC_ORIGIN and tunnel forwarding.');
+  if (publicCheck && !cookie.includes('; Secure')) throw Error('The public URL did not receive a Secure session cookie. Check PUBLIC_ORIGIN and tunnel forwarding.');
   // A public run is probed over loopback before its tunnel starts. The browser
   // origin must still match the explicitly configured public HTTPS origin.
-  const origin = browserOrigin ?? new URL(base).origin;
   const probe = await fetcher(base + '/api/workspace', {
     method: 'POST', headers: { ...guest, Origin: origin, 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: '__judges_origin_probe__' }), signal: AbortSignal.timeout(5000),

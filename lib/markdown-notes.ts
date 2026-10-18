@@ -1,12 +1,12 @@
 import {z} from 'zod';
-import type {Note, Workspace} from './study';
-// Markdown note import/export. Front matter carries the title and subject so exports round-trip;
-// other front matter keys (tags, aliases from other apps) are left in the note body untouched.
+import {validateNoteBody, normalizeTags, type Note, type Workspace} from './study.ts';
+// Markdown note import/export. Front matter carries the title, subject and tags so exports round-trip;
+// other front matter keys (aliases and the like from other apps) are left in the note body untouched.
 export type MarkdownFile = {path: string; content: string};
-export type ParsedNote = {title: string; body: string; subject?: string};
+export type ParsedNote = {title: string; body: string; subject?: string; tags?: string[]};
 const quote = (v: string) => JSON.stringify(v);
 function unquote(v: string) { v = v.trim(); if (v.startsWith('"')) { try { return String(JSON.parse(v)); } catch { return v.slice(1, -1); } } if (v.startsWith("'") && v.endsWith("'")) return v.slice(1, -1).replace(/''/g, "'"); return v; }
-export function noteToMarkdown(n: Pick<Note, 'title' | 'body'>, subject?: string) { return `---\ntitle: ${quote(n.title)}\n${subject ? `subject: ${quote(subject)}\n` : ''}---\n\n${n.body}`; }
+export function noteToMarkdown(n: Pick<Note, 'title' | 'body' | 'tags'>, subject?: string) { return `---\ntitle: ${quote(n.title)}\n${subject ? `subject: ${quote(subject)}\n` : ''}${n.tags?.length ? `tags: [${n.tags.map(quote).join(', ')}]\n` : ''}---\n\n${n.body}`; }
 export function safeFileName(title: string) { return title.replace(/[\\/:*?"<>|#^[\]\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 150) || 'Untitled'; }
 export function parseMarkdownNote(path: string, text: string, folderSubjects = true): ParsedNote {
     const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
@@ -15,8 +15,17 @@ export function parseMarkdownNote(path: string, text: string, folderSubjects = t
     if (folderSubjects && parts.length) result.subject = parts[parts.length - 1];
     const front = result.body.match(/^---\n([\s\S]*?)\n---[ \t]*(?:\n|$)/);
     if (front) {
-        const kept: string[] = [];
-        for (const line of front[1].split('\n')) {
+        const kept: string[] = [], lines = front[1].split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            // Tags as `tags: [a, b]`, `tags: a, b`, or a YAML list of `  - a` lines, as Obsidian writes them.
+            const tags = line.match(/^tags:\s*(.*)$/);
+            if (tags) {
+                const items = tags[1].trim() ? tags[1].trim().replace(/^\[|\]$/g, '').split(',') : [];
+                while (!tags[1].trim() && /^\s+-\s*/.test(lines[i + 1] ?? '')) items.push(lines[++i].replace(/^\s+-\s*/, ''));
+                result.tags = normalizeTags(items.map(unquote));
+                continue;
+            }
             const m = line.match(/^(title|subject):\s*(.*)$/);
             if (m && unquote(m[2])) result[m[1] as 'title' | 'subject'] = unquote(m[2]); else kept.push(line);
         }
@@ -40,7 +49,7 @@ export function notesToFiles(w: Workspace, notes = w.notes): MarkdownFile[] {
         return {path, content: noteToMarkdown(n, subject)};
     });
 }
-const importSchema = z.object({notes: z.array(z.object({title: z.string().trim().min(1).max(200), body: z.string().max(100000), subject: z.string().trim().min(1).max(100).optional()})).min(1, 'Choose at least one Markdown file').max(1000), subject: z.string().max(100).optional(), newSubject: z.string().trim().max(100).optional()});
+const importSchema = z.object({notes: z.array(z.object({title: z.string().trim().min(1).max(200), body: z.string().max(1048576).refine(v=>new TextEncoder().encode(v).length<=1048576, 'Note exceeds 1 MiB of text'), subject: z.string().trim().min(1).max(100).optional(), tags: z.array(z.string().max(200)).max(200).optional()})).min(1, 'Choose at least one Markdown file').max(1000), subject: z.string().max(100).optional(), newSubject: z.string().trim().max(100).optional()});
 // Adds notes to the workspace. Subjects are matched by name (created when missing); notes without
 // one use the chosen fallback subject, or stay uncategorised. Notes identical to an existing note are skipped.
 export function importMarkdownNotes(w: Workspace, input: unknown) {
@@ -50,9 +59,10 @@ export function importMarkdownNotes(w: Workspace, input: unknown) {
     if (!fallback && p.newSubject) fallback = byName(p.newSubject);
     let imported = 0, skipped = 0;
     for (const n of p.notes) {
+        validateNoteBody(n.body);
         const subject = n.subject ? byName(n.subject) : fallback;
         if (w.notes.some(x => x.subject === subject && x.title === n.title && x.body === n.body)) { skipped++; continue; }
-        w.notes.push({id: crypto.randomUUID(), title: n.title, body: n.body, subject, aliases: [], version: 1, updated: new Date().toISOString()});
+        w.notes.push({id: crypto.randomUUID(), title: n.title, body: n.body, subject, ...(n.tags?.length ? {tags: normalizeTags(n.tags)} : {}), aliases: [], version: 1, updated: new Date().toISOString()});
         imported++;
     }
     return {imported, skipped};

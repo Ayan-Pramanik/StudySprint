@@ -109,10 +109,12 @@ Typing and the rest of StudySprint remain usable while another visitor dictates.
 ## Data and troubleshooting
 
 - Each browser receives a separate guest workspace. There are no accounts or automatic cross-device sync. Keep the same assigned URL across judging sessions; clearing cookies or changing hostname loses that browser's access until a backup is restored.
-- Judging data lives in `.wrangler/judges-state`, separate from ordinary `.wrangler/state`. The launcher checks for the committed initial schema and applies it only to a fresh database, first copying the local state into `.sites-runtime/judges/backups`. It refuses partial schemas and never blindly replays migrations.
+- Judging data lives in `.wrangler/judges-state`, separate from ordinary `.wrangler/state`. The launcher first copies local state into `.sites-runtime/judges/backups`, then applies outstanding journaled migrations with the same migration runner as the main app. Account and note-storage migrations stay confined to this judging database.
 - Private settings live outside the build in `.sites-runtime/judges.env`. A fresh `dist/server/.dev.vars` is generated for this run after each build, containing only the public origin, loopback speech URL and private service secret. Downloaded models and runtime caches also stay inside this checkout's ignored `.sites-runtime` directory.
 - Private service logs and process ownership records live under `.sites-runtime/judges/`. A failed startup cleans up owned processes. Inspect these logs locally when the launcher reports a readiness failure; do not publish them or credentials.
 - A port collision means another process already owns that port. Stop that process yourself if appropriate, or choose a different app port. No launcher command replaces it automatically.
 - If ngrok fails, confirm account authentication, the exact assigned domain, the free account's current limits and default local API address. The scripts never create a paid subscription or change billing settings.
 
 References: [ngrok CLI](https://ngrok.com/docs/gateway/agent/cli), [ngrok agent configuration](https://ngrok.com/docs/gateway/agent/config/v3), and [WhisperLiveKit](https://github.com/QuentinFuxa/WhisperLiveKit).
+
+The current app requires an account. Sign up or log in before opening notes or dictating; legacy guest cookies cannot authorize dictation. Launcher readiness creates disposable test accounts to check authenticated routes without using your credentials.

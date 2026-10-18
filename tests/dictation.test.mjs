@@ -1,25 +1,25 @@
 import assert from 'node:assert/strict';
 import { applicationOrigin, validOrigin, guestIdentity, guestId } from '../lib/server/request-security.ts';
-import { handleDictation, speechConfiguration } from '../lib/server/dictation.ts';
+import { handleDictation as handle, speechConfiguration } from '../lib/server/dictation.ts';
 
+const handleDictation = (req, env, upstream) => handle(req, env, upstream, async request => { const token=request.headers.get('cookie')?.match(/ss_session=([^;]+)/)?.[1]; return token===guest ? guest : token===other ? other : undefined; });
 const publicOrigin = 'https://judges.example.ngrok-free.app';
 const guest = '00000000-0000-4000-8000-000000000001';
 const other = '00000000-0000-4000-8000-000000000002';
 const note = '00000000-0000-4000-8000-000000000003';
 const request = (path, headers = {}, method = 'GET') => new Request(`http://127.0.0.1:8789${path}`, {
   method,
-  headers: { Cookie: `ss_guest=${guest}`, ...headers },
+  headers: { Cookie: `ss_session=${guest}`, ...headers },
 });
 const environment = {
   PUBLIC_ORIGIN: publicOrigin,
   SPEECH_SERVICE_URL: 'http://127.0.0.1:8000',
   SPEECH_SERVICE_SECRET: 'private-service-secret-must-not-reach-browser',
   DB: { prepare(sql) {
-    assert.equal(sql, 'SELECT data FROM workspaces WHERE id=?');
-    return { bind(id) { return { async first() {
-      if (id === guest) return { data: JSON.stringify({ notes: [{ id: note }] }) };
-      if (id === other) return { data: JSON.stringify({ notes: [] }) };
-      return null;
+    assert.ok(['SELECT id FROM workspaces WHERE id=?','SELECT id FROM notes WHERE workspace=? AND id=?'].includes(sql));
+    return { bind(id, noteId) { return { async first() {
+      if (sql.includes('FROM notes')) return id===guest && noteId===note ? {id:note} : null;
+      return id===guest || id===other ? {id} : null;
     } }; } };
   } },
 };
@@ -35,14 +35,14 @@ assert.equal(validOrigin(request('/'), environment), true); // Existing command-
 for (const invalid of ['http://example.com', 'https://example.com/path', 'https://user:secret@example.com', 'https://example.com/?query=1']) {
   assert.throws(() => applicationOrigin(request('/'), { PUBLIC_ORIGIN: invalid }));
 }
-assert.equal(guestId(request('/')), guest);
+assert.equal(guestId(request('/')), undefined);
 assert.equal(guestId(request('/', { Cookie: `other=x; ss_guest=${guest}; another=y` })), guest);
 assert.equal(guestId(request('/', { Cookie: `ss_guest=${guest}extra` })), undefined);
 const secure = guestIdentity(request('/', { Cookie: '' }), environment);
 assert.match(secure.cookie, /; Secure$/);
 assert.match(secure.cookie, /HttpOnly; SameSite=Lax/);
 assert.doesNotMatch(guestIdentity(request('/', { Cookie: '' }), {}).cookie, /Secure/);
-assert.equal(guestIdentity(request('/'), environment).cookie, undefined);
+assert.equal(guestIdentity(request('/', {Cookie:`ss_guest=${guest}`}), environment).cookie, undefined);
 
 assert.equal(await handleDictation(request('/api/workspace'), environment, neverFetch), undefined);
 assert.equal((await handleDictation(request('/api/dictation/status', {}, 'POST'), environment, neverFetch)).status, 405);
@@ -79,7 +79,7 @@ const socketHeaders = { Origin: publicOrigin, Upgrade: 'websocket' };
 assert.equal((await handleDictation(request(`/api/dictation?noteId=${note}`, { Upgrade: 'websocket' }), environment, neverFetch)).status, 403);
 assert.equal((await handleDictation(request(`/api/dictation?noteId=${note}`, { Origin: publicOrigin }), environment, neverFetch)).status, 426);
 assert.equal((await handleDictation(request('/api/dictation?noteId=missing', socketHeaders), environment, neverFetch)).status, 404);
-assert.equal((await handleDictation(request(`/api/dictation?noteId=${note}`, { ...socketHeaders, Cookie: `ss_guest=${other}` }), environment, neverFetch)).status, 404);
+assert.equal((await handleDictation(request(`/api/dictation?noteId=${note}`, { ...socketHeaders, Cookie: `ss_session=${other}` }), environment, neverFetch)).status, 404);
 let socketCalled = false;
 result = await handleDictation(request(`/api/dictation?noteId=${note}`, socketHeaders), environment, async (url, init) => {
   socketCalled = true;
@@ -94,3 +94,6 @@ assert.equal(socketCalled, true);
 assert.equal(result.status, 503);
 assert.doesNotMatch(await result.text(), /private upstream detail/);
 console.log('Dictation request security, ownership, configuration and upstream failure checks passed.');
+
+assert.equal((await handleDictation(request('/api/dictation/status',{Cookie:`ss_guest=${guest}`}),environment,neverFetch)).status,401);
+assert.equal((await handle(request('/api/dictation/status'),environment,neverFetch)).status,401);

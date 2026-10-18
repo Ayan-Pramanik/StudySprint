@@ -42,18 +42,19 @@ for (const [base, browserOrigin] of [
   const requests = [];
   const fetcher = async (url, init) => {
     requests.push([url, init]);
+    if(url.endsWith('/api/auth/signup'))return Response.json({ok:true},{headers:{'set-cookie':'ss_session=fixture; HttpOnly; SameSite=Lax'+(base.startsWith('https:')?'; Secure':'')}});
     if (url.endsWith('/api/dictation/status')) {
-      assert.equal(init.headers.cookie, 'ss_guest=fixture');
+      assert.equal(init.headers.cookie, 'ss_session=fixture');
       return Response.json({ configured: true, available: true, busy: false });
     }
     if (init.method === 'POST' || url.endsWith('/api/dictation')) {
       assert.equal(init.headers.Origin, browserOrigin ?? new URL(base).origin, 'Both mutation and streaming probes must use the configured browser origin, even over loopback');
       return init.method === 'POST' ? Response.json({ error: 'Unknown action' }, { status: 400 }) : Response.json({ error: 'A WebSocket connection is required.' }, { status: 426 });
     }
-    return Response.json({ workspace: {}, version: 0 }, { headers: { 'set-cookie': 'ss_guest=fixture; HttpOnly; SameSite=Lax' + (base.startsWith('https:') ? '; Secure' : '') } });
+    return Response.json({ workspace: {}, version: 0 }, { headers: { 'set-cookie': 'ss_session=fixture; HttpOnly; SameSite=Lax' + (base.startsWith('https:') ? '; Secure' : '') } });
   };
   assert.equal(await workspaceReady(base, { publicCheck: base.startsWith('https:'), browserOrigin, fetcher }), true);
-  assert.equal(requests.length, 4, 'Readiness must cover workspace, speech health, mutation origin and streaming origin');
+  assert.equal(requests.length, 5, 'Readiness must cover workspace, speech health, mutation origin and streaming origin');
 }
 
 const barrier = launchBarrier();

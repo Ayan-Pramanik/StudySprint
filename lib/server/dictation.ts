@@ -1,4 +1,4 @@
-import { guestId, validOrigin } from './request-security.ts';
+import { validOrigin } from './request-security.ts';
 
 type Environment = Cloudflare.Env;
 type Fetch = typeof fetch;
@@ -19,22 +19,16 @@ export function speechConfiguration(environment: Environment) {
   return { origin: url.origin, secret };
 }
 
-async function ownedWorkspace(request: Request, environment: Environment) {
-  const id = guestId(request);
-  if (!id || !environment.DB) return undefined;
-  const row = await environment.DB.prepare('SELECT data FROM workspaces WHERE id=?').bind(id).first<{ data: string }>();
-  return row ? { id, data: JSON.parse(row.data) as { notes?: { id: string }[] } } : undefined;
-}
-
 /** Runs before the framework so WebSocket upgrades keep their native response. */
-export async function handleDictation(request: Request, environment: Environment, upstreamFetch: Fetch = fetch): Promise<Response | undefined> {
+export async function handleDictation(request: Request, environment: Environment, upstreamFetch: Fetch = fetch, resolveWorkspaceId: (request: Request) => Promise<string | undefined> = async () => undefined): Promise<Response | undefined> {
   const url = new URL(request.url);
   if (url.pathname !== '/api/dictation' && url.pathname !== '/api/dictation/status') return undefined;
   try {
     if (request.method !== 'GET') return json({ error: 'Method not allowed.' }, 405);
     const streaming = url.pathname === '/api/dictation';
     if (!validOrigin(request, environment, streaming)) return json({ error: 'Invalid origin.' }, 403);
-    const workspace = await ownedWorkspace(request, environment);
+    const workspaceId = await resolveWorkspaceId(request);
+    const workspace = workspaceId && environment.DB && await environment.DB.prepare('SELECT id FROM workspaces WHERE id=?').bind(workspaceId).first();
     if (!workspace) return json({ error: 'Reload to start your workspace.' }, 401);
     const configuration = speechConfiguration(environment);
     if (!configuration) {
@@ -58,7 +52,7 @@ export async function handleDictation(request: Request, environment: Environment
     }
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return json({ error: 'A WebSocket connection is required.' }, 426);
     const noteId = url.searchParams.get('noteId');
-    if (!noteId || !workspace.data.notes?.some(note => note.id === noteId)) return json({ error: 'Note unavailable.' }, 404);
+    if (!noteId || !await environment.DB!.prepare('SELECT id FROM notes WHERE workspace=? AND id=?').bind(workspaceId, noteId).first()) return json({ error: 'Note unavailable.' }, 404);
     const response = await upstreamFetch(`${configuration.origin}/asr?mode=full`, {
       headers: { Upgrade: 'websocket', Authorization: `Bearer ${configuration.secret}` },
       redirect: 'manual',

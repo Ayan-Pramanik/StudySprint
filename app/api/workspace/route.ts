@@ -1,10 +1,14 @@
 import { env } from 'cloudflare:workers';
-import { empty, uid, rate, bindLinks, makeCard, type Workspace, type Note } from '../../../lib/study';
+import { uid, rate, bindLinks, makeCard, normalizeTags, validateNoteBody, type Workspace } from '../../../lib/study';
+import { ensureWorkspace,requireWorkspaceId,readWorkspace,readSnapshot,readNote,digest,saveWorkspace,checkOrigin,errorResponse } from '../../../lib/server/workspace-store';
 import { z } from 'zod';
 import { importBackup } from '../../../lib/backup';
 import { importMarkdownNotes } from '../../../lib/markdown-notes';
+import { importCards } from '../../../lib/card-import';
+import { importQuizzes, recordAttempt } from '../../../lib/quiz';
 import { clozeDrafts } from '../../../lib/generation';
-import { guestIdentity, validOrigin } from '../../../lib/server/request-security';
+
+
 async function aiFetch(url: string, init: RequestInit) { let response: Response | undefined; for (let attempt = 0; attempt < 2; attempt++) {
     response = await fetch(url, { ...init, signal: AbortSignal.timeout(25000) });
     if (response.status !== 429 && response.status < 500)
@@ -13,30 +17,19 @@ async function aiFetch(url: string, init: RequestInit) { let response: Response 
         await new Promise(r => setTimeout(r, 500));
 } return response!; }
 const json = (data: unknown, status = 200, cookie?: string) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...(cookie ? { 'Set-Cookie': cookie } : {}) } });
-async function identity(req: Request) { return guestIdentity(req, env); }
-export async function GET(req: Request) { const { id, cookie } = await identity(req); await env.DB!.prepare('INSERT OR IGNORE INTO workspaces (id,data,version) VALUES (?,?,0)').bind(id, JSON.stringify({ ...empty(), zone: (() => { const zone = new URL(req.url).searchParams.get('zone') || 'UTC'; try {
-        new Intl.DateTimeFormat('en', { timeZone: zone });
-        return zone;
-    }
-    catch {
-        return 'UTC';
-    } })() })).run(); const row = await env.DB!.prepare('SELECT data,version FROM workspaces WHERE id=?').bind(id).first<any>(); const workspace = JSON.parse(row.data); const events = await env.DB!.prepare('SELECT data FROM review_events WHERE workspace=? ORDER BY rowid').bind(id).all<any>(); workspace.events = events.results.map((e: any) => JSON.parse(e.data)); return json({ workspace, version: row.version, ai: !!(env as any).AI_API_KEY }, 200, cookie); }
+export async function GET(req: Request) { try { const {id,user}=await ensureWorkspace(req);const {workspace,version}=await readSnapshot(id);return json({workspace,version,ai:!!env.AI_API_KEY,uploads:!!(env.BUCKET&&env.IMPORT_QUEUE&&env.CONVERTER_URL&&env.CONVERTER_SECRET),user}); } catch(e){return errorResponse(e);} }
 export async function POST(req: Request) {
     try {
-        if (!validOrigin(req, env))
-            return json({ error: 'Invalid origin' }, 403);
-        const { id } = await identity(req);
-        const row = await env.DB!.prepare('SELECT data,version FROM workspaces WHERE id=?').bind(id).first<any>();
-        if (!row)
-            return json({ error: 'Reload to start your workspace.' }, 401);
-        const payload = await req.text();
-        if (payload.length > 3000000)
-            throw Error('Request is too large');
-        const { action, ...p } = JSON.parse(payload);
-        const w: Workspace = JSON.parse(row.data);
-        const existingEvents = await env.DB!.prepare('SELECT data FROM review_events WHERE workspace=? ORDER BY rowid').bind(id).all<any>();
-        w.events = existingEvents.results.map((e: any) => JSON.parse(e.data));
-        const previousEventIds = new Set(w.events.map(e => e.id));
+        checkOrigin(req);
+        const id=await requireWorkspaceId(req);
+        const payload=await req.text();
+        if(new TextEncoder().encode(payload).length>3000000)throw Error('Request is too large');
+        const {action,...p}=JSON.parse(payload);
+        const {workspace:w,version}=await readWorkspace(id);
+        const target=action==='card'?p.note:['note','generate'].includes(action)?p.id:undefined;
+        if(target){const index=w.notes.findIndex(n=>n.id===target);if(index>=0)w.notes[index]=await readNote(id,target);}
+        if(action==='importNotes'&&Array.isArray(p.notes)){for(const input of p.notes){if(typeof input.body!=='string')continue;const hash=await digest(input.body);for(const n of w.notes)if(n.title===input.title&&(n as any).bodyHash===hash)n.body=input.body;}}
+
         const note = () => { const n = w.notes.find(n => n.id === p.id); if (!n)
             throw Error('Note unavailable'); return n; };
         const card = () => { const c = w.cards.find(c => c.id === p.id); if (!c)
@@ -51,6 +44,22 @@ export async function POST(req: Request) {
         }
         else if(action === 'import') { importBackup(w,p.backup); }
         else if (action === 'importNotes') { result = importMarkdownNotes(w, p); }
+        else if (action === 'importCards') { result = importCards(w, p); }
+        else if (action === 'importQuizzes') { result = importQuizzes(w, p); }
+        else if (action === 'quizAttempt') { result = recordAttempt(w, p); }
+        else if (action === 'quiz') {
+            const q = w.quizzes?.find(q => q.id === p.id);
+            if (!q)
+                throw Error('Quiz unavailable');
+            if (p.subject && !w.subjects.some(s => s.id === p.subject))
+                throw Error('Subject unavailable');
+            Object.assign(q, { title: name(p.title), subject: p.subject || '', updated: new Date().toISOString() });
+        }
+        else if (action === 'deleteQuiz') {
+            w.quizzes = (w.quizzes || []).filter(q => q.id !== p.id);
+            // Its attempts go too: they cannot be reviewed without the questions.
+            w.quizAttempts = (w.quizAttempts || []).filter(a => a.quiz !== p.id);
+        }
         else if (action === 'subject') {
             if (p.id) {
                 const s = w.subjects.find(s => s.id === p.id);
@@ -68,13 +77,16 @@ export async function POST(req: Request) {
                 n.subject = ''; });
             w.cards.forEach(c => { if (c.subject === p.id)
                 c.subject = ''; });
+            w.quizzes?.forEach(q => { if (q.subject === p.id)
+                q.subject = ''; });
         }
         else if (action === 'note') {
             if (!p.id && p.newSubject) { const subject = {id:uid(),name:name(p.newSubject,100)};w.subjects.push(subject);p.subject=subject.id;}
             p.subject ||= '';
             if (p.subject && !w.subjects.some(s => s.id === p.subject))
                 throw Error('Subject unavailable');
-            if (p.id) {
+            // `create` carries a client-made id (notes written offline); replaying it after a lost response updates the note instead.
+            if (p.id && (!p.create || w.notes.some(n => n.id === p.id))) {
                 const n = note();
                 if(p.expectedUpdated && p.expectedUpdated !== n.updated) throw Error("This note changed in another tab. Your unsaved text is preserved; reload the saved note before retrying.");
                 if (n.title !== p.title)
@@ -85,10 +97,10 @@ export async function POST(req: Request) {
                     n.version++;
                 }
                 w.cards.filter(c=>c.note===n.id).forEach(c=>c.subject=p.subject);
-                Object.assign(n, { title: name(p.title), body: str(p.body), subject: p.subject, updated: new Date().toISOString() });
+                Object.assign(n, { title: name(p.title), body: validateNoteBody(str(p.body,1048576)), subject: p.subject, ...(p.tags !== undefined ? {tags:normalizeTags(p.tags)} : {}), updated: new Date().toISOString() });
             }
             else
-                w.notes.push({ id: uid(), title: name(p.title), body: str(p.body), subject: p.subject, aliases: [], version: 1, updated: new Date().toISOString() });
+                w.notes.push({ id: p.create ? z.string().uuid().parse(p.id) : uid(), tags:normalizeTags(p.tags), title: name(p.title), body: validateNoteBody(str(p.body,1048576)), subject: p.subject, aliases: [], version: 1, updated: new Date().toISOString() });
         }
         else if (action === 'moveNote') {
             // Moves a note and its cards to another subject ('' = no subject). `updated` is left alone so an open editor's autosave stays valid.
@@ -116,7 +128,7 @@ export async function POST(req: Request) {
             const n = w.notes.find(n => n.id === p.note);
             if(p.note && !n) throw Error('Source note unavailable');
             if(p.subject && !w.subjects.some(s=>s.id===p.subject)) throw Error('Subject unavailable');
-            const c = p.id ? card() : makeCard(n, '', '', p.excerpt || (n?.body || ''), 'active');
+            const c = p.id ? card() : makeCard(n, '', '', p.excerpt || (n&&n.body.length<=24000?n.body:''), 'active');
             if(!p.id) c.subject=n?.subject||p.subject||'';
             c.front = str(p.front, 4000);
             c.answer = str(p.answer, 4000);
@@ -183,16 +195,12 @@ export async function POST(req: Request) {
             throw Error('Unknown action');
         if (action === 'note' || action === 'importNotes')
             w.notes.forEach(n => bindLinks(w, n));
-        const mutation = uid();
-        const statements = [env.DB!.prepare('UPDATE workspaces SET data=?, version=version+1, mutation=? WHERE id=? AND version=?').bind(JSON.stringify({ ...w, events: [] }), mutation, id, row.version)];
-        for (const e of w.events.filter(e => !previousEventIds.has(e.id)))
-            statements.push(env.DB!.prepare('INSERT INTO review_events (id,workspace,data) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM workspaces WHERE id=? AND mutation=?)').bind(id + ':' + e.id, id, JSON.stringify(e), id, mutation));
-        const batch = await env.DB!.batch(statements);
-        if (!batch[0].meta.changes)
-            return json({ error: 'Workspace changed in another tab. Retry your action.' }, 409);
-        return json({ workspace: w, version: row.version + 1, result });
+        const nextVersion=await saveWorkspace(id,w,version);
+        const {workspace}=await readSnapshot(id);
+        return json({workspace,version:nextVersion,result});
     }
     catch (e) {
-        return json({ error: e instanceof z.ZodError ? e.issues.slice(0,3).map(i=>`${i.path.join('.')||'Input'}: ${i.message}`).join('; ') : e instanceof Error ? e.message : 'Unable to save. Please retry.' }, 400);
+        if(!(e instanceof z.ZodError))return errorResponse(e);
+        return json({error:e.issues.slice(0,3).map(i=>`${i.path.join('.')||'Input'}: ${i.message}`).join('; ')},400);
     }
 }

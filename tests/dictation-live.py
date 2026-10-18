@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import sys
 import time
+import uuid
 import urllib.request
 from urllib.error import HTTPError
 
@@ -35,13 +36,19 @@ def api(base, path, cookie="", payload=None):
         return json.load(response), response.headers.get("Set-Cookie", "").split(";")[0]
 
 
+def create_session(base):
+    _, cookie = api(base, '/api/auth/signup', payload={"name":"Dictation QA", "email":f"dictation-{uuid.uuid4()}@example.invalid", "password":str(uuid.uuid4())})
+    api(base, '/api/workspace', cookie)
+    return cookie
+
+
 async def main(options):
     base = options.url.rstrip("/")
     if not base.startswith("http://127.0.0.1:"):
         raise ValueError("This test creates disposable notes; use an isolated local QA server.")
     if options.disconnect_after and not options.audio:
         raise ValueError("Disconnect testing requires a synthetic audio fixture.")
-    _, cookie = api(base, "/api/workspace")
+    cookie = create_session(base)
     result, _ = api(base, "/api/workspace", cookie, {
         "action": "note", "title": f"Synthetic dictation check {time.time_ns()}", "body": "", "subject": "",
     })
@@ -49,7 +56,7 @@ async def main(options):
     address = base.replace("http://", "ws://", 1) + "/api/dictation?noteId=" + note
     print("Created disposable integration note; checking isolation and origin.", flush=True)
     try:
-        _, other_cookie = api(base, "/api/workspace")
+        other_cookie = create_session(base)
         for rejected_cookie, origin, expected in ((other_cookie, base, 404), (cookie, "https://attacker.example", 403)):
             try:
                 async with connect(address, origin=origin, additional_headers={"Cookie": rejected_cookie}):
@@ -170,8 +177,8 @@ async def main(options):
         release_wait = round(time.monotonic() - released_at, 2)
         saved_body = "Typed before dictation.\n" + text + "\nTyped after dictation."
         api(base, "/api/workspace", cookie, {"action": "note", "id": note, "title": "Synthetic dictation save check", "body": saved_body, "subject": ""})
-        reloaded, _ = api(base, "/api/workspace", cookie)
-        assert next(item for item in reloaded["workspace"]["notes"] if item["id"] == note)["body"] == saved_body, "Confirmed text or typing was lost on save/reload"
+        reloaded, _ = api(base, "/api/notes/" + note, cookie)
+        assert reloaded["note"]["body"] == saved_body, "Confirmed text or typing was lost on save/reload"
         lags = [lag for _, lag in committed_updates if lag is not None]
         report = {
             "audio_seconds": round(len(audio) / 16000, 2),
