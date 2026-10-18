@@ -1,0 +1,4 @@
+import {checkOrigin,errorResponse,requireWorkspaceId} from '@/lib/server/workspace-store';
+import {cancelImport,getImportJob,publicJob,retryImport} from '@/lib/server/import-jobs';
+export async function GET(req:Request,{params}:{params:Promise<{id:string}>}){try{return Response.json({job:publicJob(await getImportJob((await params).id,await requireWorkspaceId(req)))},{headers:{'Cache-Control':'no-store'}});}catch(e){return errorResponse(e);}}
+export async function POST(req:Request,{params}:{params:Promise<{id:string}>}){try{checkOrigin(req);const workspace=await requireWorkspaceId(req),{id}=await params,{action}=await req.json() as {action:string};if(action!=='retry'&&action!=='cancel')throw Error('Choose retry or cancel.');return Response.json({job:publicJob(await(action==='retry'?retryImport(workspace,id):cancelImport(workspace,id)))});}catch(e){return errorResponse(e);}}

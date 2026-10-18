@@ -1,0 +1,5 @@
+import { backupError, finishBackupUpload, uploadBackupPart } from '../../../../lib/server/backups';
+
+type Context = { params: Promise<{ id: string }> };
+export async function PUT(req: Request, context: Context) { try { return await uploadBackupPart(req, (await context.params).id); } catch (error) { if(req.body&&!req.body.locked){const reader=req.body.getReader();let size=0;try{for(;;){const next=await reader.read();if(next.done)break;size+=next.value.length;if(size>8*1024*1024){await reader.cancel();break;}}}catch{}finally{reader.releaseLock();}}return backupError(error); } }
+export async function POST(req: Request, context: Context) { try { return await finishBackupUpload(req, (await context.params).id); } catch (error) { if(req.body&&!req.body.locked){const reader=req.body.getReader();let size=0;try{for(;;){const next=await reader.read();if(next.done)break;size+=next.value.length;if(size>8*1024*1024){await reader.cancel();break;}}}catch{}finally{reader.releaseLock();}}return backupError(error); } }

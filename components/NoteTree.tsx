@@ -1,23 +1,23 @@
 'use client';
-import { useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { ArrowDownAZ, ChevronRight, ChevronsDownUp, ChevronsUpDown, Clock, FileText, FolderPlus, Plus, Search, SquarePen } from 'lucide-react';
-import type { Note, Workspace } from '../lib/study';
+import type { NoteSummary, WorkspaceSnapshot } from '../lib/study';
 import { UNCATEGORISED } from '../lib/note-graph';
 
 type Sort = 'name' | 'updated';
 type Props = {
-    w: Workspace;
+    w: WorkspaceSnapshot;
     selected: string;
     /** Subject id of the active folder ('' for none); shared with the rest of the app's subject filter. */
     folder: string;
     search: string;
     onSearch: (q: string) => void;
-    onSelect: (note: Note) => void;
+    onSelect: (note: NoteSummary) => void;
     onFolder: (id: string) => void;
     onNewNote: (subject: string) => void;
     onNewFolder: () => void;
     /** Drop a note on a folder (subject id) or on the root (''). */
-    onMove: (note: Note, subject: string) => void;
+    onMove: (note: NoteSummary, subject: string) => void;
 };
 const ROOT = '\u0000root';
 
@@ -47,8 +47,12 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
     }
 
     const q = search.trim().toLowerCase();
-    const matches = (n: Note) => !q || `${n.title} ${n.body}`.toLowerCase().includes(q);
-    const order = (notes: Note[]) => [...notes].sort(sort === 'name' ? byName : (a, b) => b.updated.localeCompare(a.updated));
+    const [searchResult,setSearchResult]=useState<{query:string;ids:Set<string>}>({query:'',ids:new Set()});
+    const [searchError,setSearchError]=useState('');
+    useEffect(()=>{if(!q){setSearchError('');return;}const controller=new AbortController();setSearchError('');const timer=setTimeout(()=>{fetch('/api/notes/search?q='+encodeURIComponent(q),{signal:controller.signal}).then(async r=>{const data=await r.json() as {ids:string[];error?:string};if(!r.ok)throw Error(data.error||'Search could not load.');setSearchResult({query:q,ids:new Set(data.ids)});}).catch(e=>{if(e.name!=='AbortError')setSearchError(e.message);});},200);return()=>{clearTimeout(timer);controller.abort();};},[q,w.notes]);
+    const searching=!!q&&searchResult.query!==q&&!searchError;
+    const matches = (n: NoteSummary) => !q || n.title.toLowerCase().includes(q) || (searchResult.query===q&&searchResult.ids.has(n.id));
+    const order = (notes: NoteSummary[]) => [...notes].sort(sort === 'name' ? byName : (a, b) => b.updated.localeCompare(a.updated));
     const known = new Set(w.subjects.map(s => s.id));
     const folders = [...w.subjects].sort(byName).map(s => ({ ...s, notes: order(w.notes.filter(n => n.subject === s.id && matches(n))), total: w.notes.filter(n => n.subject === s.id).length }));
     const loose = order(w.notes.filter(n => (!n.subject || !known.has(n.subject)) && matches(n)));
@@ -58,7 +62,7 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
     const [dragId, setDragId] = useState(''), [dropTarget, setDropTarget] = useState('');
     const openTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
     const dragged = w.notes.find(n => n.id === dragId);
-    const currentFolder = (n: Note) => n.subject && known.has(n.subject) ? n.subject : '';
+    const currentFolder = (n: NoteSummary) => n.subject && known.has(n.subject) ? n.subject : '';
     const endDrag = () => { clearTimeout(openTimer.current); setDragId(''); setDropTarget(''); };
     const over = (target: string) => (e: DragEvent) => {
         if (!dragged || currentFolder(dragged) === (target === ROOT ? '' : target)) return;
@@ -83,7 +87,7 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
 
     const visibleCount = folders.reduce((n, f) => n + f.notes.length, 0) + loose.length;
 
-    const noteRow = (n: Note, depth: number) => <li key={n.id}><button draggable onDragStart={e => { e.dataTransfer.setData('text/plain', n.title); e.dataTransfer.effectAllowed = 'move'; setDragId(n.id); }} onDragEnd={endDrag}
+    const noteRow = (n: NoteSummary, depth: number) => <li key={n.id}><button draggable onDragStart={e => { e.dataTransfer.setData('text/plain', n.title); e.dataTransfer.effectAllowed = 'move'; setDragId(n.id); }} onDragEnd={endDrag}
         className={'tree-row tree-note' + (selected === n.id ? ' selected' : '') + (dragId === n.id ? ' dragging' : '')} style={{ paddingLeft: 10 + depth * 18 }} aria-current={selected === n.id ? 'page' : undefined} onClick={() => onSelect(n)} title={n.title}>
         <FileText size={14} aria-hidden="true"/><span>{n.title}</span></button></li>;
 
@@ -94,7 +98,7 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
             <button className="icon" onClick={() => update(collapsed, sort === 'name' ? 'updated' : 'name')} aria-label={sort === 'name' ? 'Sorted by name. Sort by last edited' : 'Sorted by last edited. Sort by name'} title={sort === 'name' ? 'Sorted A–Z' : 'Sorted by last edited'}>{sort === 'name' ? <ArrowDownAZ size={16}/> : <Clock size={16}/>}</button>
             <button className="icon" disabled={!folders.length} onClick={() => update(allCollapsed ? new Set() : new Set(folders.map(f => f.id)))} aria-label={allCollapsed ? 'Expand all folders' : 'Collapse all folders'} title={allCollapsed ? 'Expand all' : 'Collapse all'}>{allCollapsed ? <ChevronsUpDown size={16}/> : <ChevronsDownUp size={16}/>}</button>
         </div>
-        <label className="search"><Search size={16}/><input aria-label="Search notes" placeholder="Find a note…" value={search} onChange={e => onSearch(e.target.value)}/></label>
+        <label className="search"><Search size={16}/><input aria-label="Search notes" maxLength={200} placeholder="Find a note…" value={search} onChange={e => onSearch(e.target.value)}/></label>
         <ul className={'tree' + (dropTarget === ROOT ? ' drop-target' : '')} {...dropProps(ROOT)}>
             {folders.map(f => {
                 // While searching, folders with matches open and empty ones hide.
@@ -112,7 +116,7 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
             {loose.map(n => noteRow(n, 0))}
             {dragged && currentFolder(dragged) && <li className="tree-root-drop" aria-hidden="true">Drop here to take it out of its folder</li>}
         </ul>
-        {q && !visibleCount && <p className="tree-empty">No notes match “{search}”.</p>}
+        {searching&&<p className="tree-empty" role="status">Searching note text…</p>}{searchError&&<p className="tree-empty" role="alert">{searchError}</p>}{q && !visibleCount && !searching && !searchError && <p className="tree-empty">No notes match “{search}”.</p>}
         {!q && !w.notes.length && !w.subjects.length && <p className="tree-empty">Create a note or a folder to begin.</p>}
     </section>;
 }

@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import type {Note, Workspace} from './study';
+import {validateNoteBody, type Note, type Workspace} from './study.ts';
 // Markdown note import/export. Front matter carries the title and subject so exports round-trip;
 // other front matter keys (tags, aliases from other apps) are left in the note body untouched.
 export type MarkdownFile = {path: string; content: string};
@@ -40,7 +40,7 @@ export function notesToFiles(w: Workspace, notes = w.notes): MarkdownFile[] {
         return {path, content: noteToMarkdown(n, subject)};
     });
 }
-const importSchema = z.object({notes: z.array(z.object({title: z.string().trim().min(1).max(200), body: z.string().max(100000), subject: z.string().trim().min(1).max(100).optional()})).min(1, 'Choose at least one Markdown file').max(1000), subject: z.string().max(100).optional(), newSubject: z.string().trim().max(100).optional()});
+const importSchema = z.object({notes: z.array(z.object({title: z.string().trim().min(1).max(200), body: z.string().max(1048576).refine(v=>new TextEncoder().encode(v).length<=1048576, 'Note exceeds 1 MiB of text'), subject: z.string().trim().min(1).max(100).optional()})).min(1, 'Choose at least one Markdown file').max(1000), subject: z.string().max(100).optional(), newSubject: z.string().trim().max(100).optional()});
 // Adds notes to the workspace. Subjects are matched by name (created when missing); notes without
 // one use the chosen fallback subject, or stay uncategorised. Notes identical to an existing note are skipped.
 export function importMarkdownNotes(w: Workspace, input: unknown) {
@@ -50,6 +50,7 @@ export function importMarkdownNotes(w: Workspace, input: unknown) {
     if (!fallback && p.newSubject) fallback = byName(p.newSubject);
     let imported = 0, skipped = 0;
     for (const n of p.notes) {
+        validateNoteBody(n.body);
         const subject = n.subject ? byName(n.subject) : fallback;
         if (w.notes.some(x => x.subject === subject && x.title === n.title && x.body === n.body)) { skipped++; continue; }
         w.notes.push({id: crypto.randomUUID(), title: n.title, body: n.body, subject, aliases: [], version: 1, updated: new Date().toISOString()});

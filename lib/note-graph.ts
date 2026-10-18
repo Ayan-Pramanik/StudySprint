@@ -1,14 +1,14 @@
-import { links, resolveLink, type Note, type Workspace } from './study.ts';
+import { linksForNote, resolveLink, type LinkedNote, type Note, type WorkspaceSnapshot, type Workspace } from './study.ts';
 export type Relationship = {source:string;target:string};
-export type NoteGraph = {notes:Note[];subjectIds:Set<string>;relationships:Relationship[];outgoing:Map<string,string[]>;incoming:Map<string,string[]>;unresolved:Map<string,{title:string;ambiguous:boolean}[]>};
-export function buildNoteGraph(workspace: Workspace): NoteGraph {
+export type NoteGraph = {notes:LinkedNote[];subjectIds:Set<string>;relationships:Relationship[];outgoing:Map<string,string[]>;incoming:Map<string,string[]>;unresolved:Map<string,{title:string;ambiguous:boolean}[]>};
+export function buildNoteGraph(workspace: Workspace | WorkspaceSnapshot): NoteGraph {
  const outgoing=new Map(workspace.notes.map(n=>[n.id,[] as string[]]));
  const incoming=new Map(workspace.notes.map(n=>[n.id,[] as string[]]));
  const unresolved:NoteGraph['unresolved']=new Map();
  const relationships:Relationship[]=[];
  for(const note of workspace.notes){
   const targets=new Set<string>(),missing:{title:string;ambiguous:boolean}[]=[];
-  for(const title of new Set(links(note.body))){
+  for(const title of new Set(linksForNote(note))){
    const matches=resolveLink(workspace,title,note);
    // Ambiguous titles are not relationships until the student chooses a target.
    if(matches.length===1&&incoming.has(matches[0].id))targets.add(matches[0].id);

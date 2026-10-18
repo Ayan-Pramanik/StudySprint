@@ -17,6 +17,11 @@ const managedLinux = readExecutionProfile() === "managed-linux";
 const localBindingConfig = {
   main: "./build/sites-worker.ts",
   compatibility_flags: ["nodejs_compat"],
+  triggers: {crons: ['0 * * * *']},
+  queues: {
+    producers: [{binding:"IMPORT_QUEUE",queue:"studysprint-imports"}],
+    consumers: [{queue:"studysprint-imports",max_batch_size:1,max_batch_timeout:1,max_retries:2,max_concurrency:1,retry_delay:30}],
+  },
   d1_databases: d1
     ? [
         {

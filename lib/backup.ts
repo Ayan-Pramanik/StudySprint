@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {uid,preview,type Workspace} from './study';
-const text=z.string().max(100000), id=z.string().min(1).max(100), stamp=z.string().datetime();
+const text=z.string().max(1048576).refine(v=>new TextEncoder().encode(v).length<=1048576,'Note exceeds 1 MiB of text'), id=z.string().min(1).max(100), stamp=z.string().datetime();
 const subject=z.object({id,name:z.string().trim().min(1).max(100)});
 const note=z.object({id,subject:z.union([id,z.literal('')]),title:z.string().trim().min(1).max(200),body:text,aliases:z.array(text).max(1000),bindings:z.record(id).optional(),updated:stamp,version:z.number().int().positive(),versions:z.array(z.object({version:z.number().int().positive(),body:text,at:stamp})).max(1000).optional()});
 const schedule=z.object({due:stamp,stability:z.number().nonnegative(),difficulty:z.number().nonnegative(),elapsed_days:z.number().nonnegative(),scheduled_days:z.number().nonnegative(),reps:z.number().int().nonnegative(),lapses:z.number().int().nonnegative(),state:z.number().int().min(0).max(3),last_review:stamp.optional(),learning_steps:z.number().int().nonnegative().optional()});

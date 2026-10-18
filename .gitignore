@@ -58,3 +58,9 @@ next-env.d.ts
 # Local credentials and compiler cache
 /.aws/
 *.tsbuildinfo
+/converter/.venv/
+/converter/.artifacts/
+**/__pycache__/
+**/.pytest_cache/
+/.playwright-mcp/
+/public/pdfjs/
