@@ -18,7 +18,13 @@
     "test:assets": "node scripts/local-run.mjs tests/assets.test.mjs",
     "test:graph": "node scripts/local-run.mjs --experimental-strip-types tests/graph.test.mjs",
     "test:graph-build": "node scripts/local-run.mjs tests/graph-build.test.mjs",
-    "test:pomodoro": "node scripts/local-run.mjs --experimental-strip-types tests/pomodoro.test.mjs"
+    "test:pomodoro": "node scripts/local-run.mjs --experimental-strip-types tests/pomodoro.test.mjs",
+    "test:dictation": "node scripts/local-run.mjs --experimental-strip-types tests/dictation.test.mjs && node scripts/local-run.mjs --experimental-strip-types tests/dictation-client.test.mjs",
+    "test:speech": "python3 -m unittest speech.test_app speech.test_benchmark_metrics -v",
+    "test:judges": "node scripts/local-run.mjs --test tests/judges.test.mjs",
+    "judges:setup": "node scripts/local-run.mjs scripts/judges-setup.mjs",
+    "judges:start": "node scripts/local-run.mjs scripts/judges-run.mjs",
+    "judges:stop": "node scripts/local-run.mjs scripts/judges-stop.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

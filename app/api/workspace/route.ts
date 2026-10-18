@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { importBackup } from '../../../lib/backup';
 import { importMarkdownNotes } from '../../../lib/markdown-notes';
 import { clozeDrafts } from '../../../lib/generation';
+import { guestIdentity, validOrigin } from '../../../lib/server/request-security';
 async function aiFetch(url: string, init: RequestInit) { let response: Response | undefined; for (let attempt = 0; attempt < 2; attempt++) {
     response = await fetch(url, { ...init, signal: AbortSignal.timeout(25000) });
     if (response.status !== 429 && response.status < 500)
@@ -12,10 +13,7 @@ async function aiFetch(url: string, init: RequestInit) { let response: Response 
         await new Promise(r => setTimeout(r, 500));
 } return response!; }
 const json = (data: unknown, status = 200, cookie?: string) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...(cookie ? { 'Set-Cookie': cookie } : {}) } });
-async function identity(req: Request) { let id = req.headers.get('cookie')?.match(/(?:^|; )ss_guest=([a-f0-9-]{36})(?:;|$)/)?.[1]; let cookie: string | undefined; if (!id) {
-    id = uid();
-    cookie = `ss_guest=${id}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${new URL(req.url).protocol === 'https:' ? '; Secure' : ''}`;
-} return { id, cookie }; }
+async function identity(req: Request) { return guestIdentity(req, env); }
 export async function GET(req: Request) { const { id, cookie } = await identity(req); await env.DB!.prepare('INSERT OR IGNORE INTO workspaces (id,data,version) VALUES (?,?,0)').bind(id, JSON.stringify({ ...empty(), zone: (() => { const zone = new URL(req.url).searchParams.get('zone') || 'UTC'; try {
         new Intl.DateTimeFormat('en', { timeZone: zone });
         return zone;
@@ -25,7 +23,7 @@ export async function GET(req: Request) { const { id, cookie } = await identity(
     } })() })).run(); const row = await env.DB!.prepare('SELECT data,version FROM workspaces WHERE id=?').bind(id).first<any>(); const workspace = JSON.parse(row.data); const events = await env.DB!.prepare('SELECT data FROM review_events WHERE workspace=? ORDER BY rowid').bind(id).all<any>(); workspace.events = events.results.map((e: any) => JSON.parse(e.data)); return json({ workspace, version: row.version, ai: !!(env as any).AI_API_KEY }, 200, cookie); }
 export async function POST(req: Request) {
     try {
-        if (req.headers.get('origin') && req.headers.get('origin') !== new URL(req.url).origin)
+        if (!validOrigin(req, env))
             return json({ error: 'Invalid origin' }, 403);
         const { id } = await identity(req);
         const row = await env.DB!.prepare('SELECT data,version FROM workspaces WHERE id=?').bind(id).first<any>();

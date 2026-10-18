@@ -58,3 +58,9 @@ next-env.d.ts
 # Local credentials and compiler cache
 /.aws/
 *.tsbuildinfo
+
+# Private local speech runtime and downloaded models
+/speech/.venv/
+/speech/.cache/
+**/__pycache__/
+**/.pytest_cache/

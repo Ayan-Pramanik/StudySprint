@@ -30,6 +30,8 @@ Open http://127.0.0.1:8787. Stop the preview before rebuilding and restart after
 
 ## AI configuration (optional)
 
+Live microphone dictation is configured separately from card generation. See [JUDGES.md](JUDGES.md) for the Apple Silicon speech service, public HTTPS link, local data and start/stop commands. Confirmed words use the existing note autosave and version history; provisional text remains a separate preview. The speech service must be configured and running before dictation is available.
+
 `AI_API_KEY` enables server-side AI card generation; `AI_MODEL` optionally overrides the default `gpt-4.1-mini`. The app shows **Generate with AI** only when the key is configured. Ordinary cloze drafting works without a key and is never presented as an AI result.
 
 For the built local Worker, place these variables in an ignored `dist/server/.dev.vars` file, then restart the server. Keep a secure copy outside `dist`, because rebuilding replaces it. For hosting, set them as runtime secrets rather than source files. Never paste keys into notes or commit them.
