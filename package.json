@@ -29,7 +29,9 @@
     "test:backups-api": "node scripts/local-run.mjs tests/backups-api.test.mjs",
     "test:queue": "node scripts/local-run.mjs tests/import-queue.test.mjs",
     "test:annotations": "node scripts/local-run.mjs tests/annotations.test.mjs",
-    "test:documents-api": "node scripts/local-run.mjs tests/documents-api.test.mjs"
+    "test:documents-api": "node scripts/local-run.mjs tests/documents-api.test.mjs",
+    "test:routing": "node scripts/local-run.mjs --experimental-strip-types tests/routing.test.mjs",
+    "test:routing-api": "node scripts/local-run.mjs tests/routing-api.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

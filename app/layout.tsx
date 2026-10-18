@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import WorkspaceApp from "../components/WorkspaceApp";
 import { THEME_SCRIPT } from "../lib/theme";
 export const metadata: Metadata = {
     title: "StudySprint",
@@ -14,6 +15,6 @@ export default function RootLayout({ children, }: Readonly<{
 }>) {
     return (<html lang="en" suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }}/></head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased"><WorkspaceApp>{children}</WorkspaceApp></body>
     </html>);
 }

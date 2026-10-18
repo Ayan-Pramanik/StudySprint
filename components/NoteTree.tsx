@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { ArrowDownAZ, ChevronRight, ChevronsDownUp, ChevronsUpDown, Clock, FileText, FolderPlus, Plus, Search, SquarePen } from 'lucide-react';
 import type { NoteSummary, WorkspaceSnapshot } from '../lib/study';
 import { UNCATEGORISED } from '../lib/note-graph';
+import { NoteLink } from './NoteLink';
 
 type Sort = 'name' | 'updated';
 type Props = {
@@ -40,7 +41,7 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
 
     // Opening a note from elsewhere (a link, the graph, a card) reveals its folder.
     const selectedSubject = w.notes.find(n => n.id === selected)?.subject ?? '';
-    const [revealed, setRevealed] = useState(selected);
+    const [revealed, setRevealed] = useState('');
     if (revealed !== selected) {
         setRevealed(selected);
         if (collapsed.has(selectedSubject)) { const next = new Set(collapsed); next.delete(selectedSubject); update(next); }
@@ -87,9 +88,9 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
 
     const visibleCount = folders.reduce((n, f) => n + f.notes.length, 0) + loose.length;
 
-    const noteRow = (n: NoteSummary, depth: number) => <li key={n.id}><button draggable onDragStart={e => { e.dataTransfer.setData('text/plain', n.title); e.dataTransfer.effectAllowed = 'move'; setDragId(n.id); }} onDragEnd={endDrag}
-        className={'tree-row tree-note' + (selected === n.id ? ' selected' : '') + (dragId === n.id ? ' dragging' : '')} style={{ paddingLeft: 10 + depth * 18 }} aria-current={selected === n.id ? 'page' : undefined} onClick={() => onSelect(n)} title={n.title}>
-        <FileText size={14} aria-hidden="true"/><span>{n.title}</span></button></li>;
+    const noteRow = (n: NoteSummary, depth: number) => <li key={n.id}><NoteLink id={n.id} draggable onDragStart={e => { e.dataTransfer.setData('text/plain', n.title); e.dataTransfer.effectAllowed = 'move'; setDragId(n.id); }} onDragEnd={endDrag}
+        className={'tree-row tree-note' + (selected === n.id ? ' selected' : '') + (dragId === n.id ? ' dragging' : '')} style={{ paddingLeft: 10 + depth * 18 }} aria-current={selected === n.id ? 'page' : undefined} onOpen={() => onSelect(n)} title={n.title}>
+        <FileText size={14} aria-hidden="true"/><span>{n.title}</span></NoteLink></li>;
 
     return <section className="note-browser tree" aria-label="Notes">
         <div className="tree-toolbar" role="toolbar" aria-label="Note tools">

@@ -115,3 +115,11 @@ Run `npm run test:graph` for relationship direction/deduplication, reciprocity, 
 Graph implementation references: [Cytoscape.js](https://js.cytoscape.org/) and [Vite workers](https://vite.dev/guide/features.html#web-workers). Graph drag, pinch/zoom, visual arrow readability, and keyboard interactions should be checked in a browser after graph changes.
 
 The production worker bundle is additionally exercised with `npm run test:graph-build`. With the preview running, `TEST_URL=http://127.0.0.1:8787 npm run test:graph-build` also checks that the graph/renderer/worker assets return JavaScript successfully and that Graph is absent from the initial dashboard's preloaded scripts. Vite's `?worker` import is used to avoid server-side `import.meta.url` rewriting in the framework.
+
+## Browser routes
+
+The main screens have their own URLs: `/`, `/focus`, `/notes`, `/graph`, `/cards`, `/review`, `/progress`, and `/settings`. A note opens at `/notes/<id>`; note-tree entries, recent notes, resolved links, backlinks, graph opening actions, and source panels support opening in another tab. Refresh and browser Back/Forward preserve the route. Renaming or moving a note does not change its URL.
+
+Note IDs are scoped to the guest workspace: opening a URL in another browser does not grant access. A missing, deleted or inaccessible note shows “Note unavailable”. Folders remain subjects in workspace metadata and have no separate routes. Search, filters, graph selection and review-session presentation remain temporary; refreshing Review rebuilds the queue from saved schedules.
+
+Run `npm run test:routing` for route parsing and ID handling. `tests/routing-browser.mjs` exports reusable browser scenarios for direct entry, refresh, navigation, history and note URLs; its tab adapter uses Codex browser methods (`goto`, `reload`, `back`, `forward`, `playwright`). Run against an isolated preview/database. Workspace links use native anchors with `next/navigation` router navigation; this also avoids the installed Vinext production `next/link` dynamic-import failure.
