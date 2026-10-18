@@ -15,8 +15,8 @@ function shuffled<T>(list: T[]) { const a = [...list]; for (let i = a.length - 1
 function download(name: string, content: string, type: string) { const url = URL.createObjectURL(new Blob([content], { type })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 export const downloadQuizTemplate = () => download('studysprint-quiz-template.csv', TEMPLATE_CSV, 'text/csv');
 
-export function QuizTab({ w, mutate, upload, confirm, modal }: { w: Workspace; mutate: Mutate; upload: () => void; confirm: (title: string, description: string, action: () => void) => void; modal: (node?: ReactNode) => void }) {
-    const [view, setView] = useState<View>({ kind: 'list' });
+export function QuizTab({ w, mutate, upload, confirm, modal, launch }: { w: Workspace; mutate: Mutate; upload: () => void; confirm: (title: string, description: string, action: () => void) => void; modal: (node?: ReactNode) => void; /** Opens straight into a quiz's start screen, e.g. to practise questions picked in Insights. */ launch?: { quiz: string; only?: string[] } }) {
+    const [view, setView] = useState<View>(() => launch ? { kind: 'setup', ...launch } : { kind: 'list' });
     const [subject, setSubject] = useState('');
     const quizzes = w.quizzes || [], attempts = w.quizAttempts || [];
     const byId = (id: string) => quizzes.find(q => q.id === id);
@@ -76,7 +76,7 @@ function QuizSetup({ quiz, only, back, start }: { quiz: Quiz; only?: string[]; b
     const count = only?.length ?? quiz.questions.length;
     return <div className="quiz-run">
         <button className="text-button quiz-back" onClick={back}><ArrowLeft size={15}/>All quizzes</button>
-        <section className="panel quiz-setup"><div className="eyebrow">{only ? 'RETRY WRONG ANSWERS' : 'READY WHEN YOU ARE'}</div><h1>{quiz.title}</h1><p>{plural(count, 'question')}{only ? ` from your last attempt` : ''}.</p>
+        <section className="panel quiz-setup"><div className="eyebrow">{only ? 'PRACTISE SELECTED QUESTIONS' : 'READY WHEN YOU ARE'}</div><h1>{quiz.title}</h1><p>{plural(count, 'question')}{only && only.length < quiz.questions.length ? ` of ${quiz.questions.length}` : ''}.</p>
             <div className="quiz-modes" role="radiogroup" aria-label="Quiz mode">{([['practice', 'Practice', 'Check each answer as you go, with explanations.'], ['test', 'Test', 'Answer everything first, then see your score.']] as const).map(([value, label, text]) => <button key={value} role="radio" aria-checked={mode === value} className={mode === value ? 'selected' : ''} onClick={() => setMode(value)}><strong>{label}</strong><span>{text}</span></button>)}</div>
             <label className="checkbox"><input type="checkbox" checked={shuffle} onChange={e => setShuffle(e.target.checked)}/><Shuffle size={14}/>Shuffle question order</label>
             <button className="primary" autoFocus onClick={() => start(mode, shuffle)}>Start {mode}<ArrowRight size={16}/></button>
