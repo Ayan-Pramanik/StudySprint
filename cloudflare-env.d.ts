@@ -7,5 +7,8 @@ declare namespace Cloudflare {
     CONVERTER_SECRET?: string;
     AI_API_KEY?: string;
     AI_MODEL?: string;
+    PUBLIC_ORIGIN?: string;
+    SPEECH_SERVICE_URL?: string;
+    SPEECH_SERVICE_SECRET?: string;
   }
 }

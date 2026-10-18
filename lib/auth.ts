@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
+import { applicationOrigin } from './server/request-security';
 import { uid } from './study';
 
 // Every workspace belongs to an email/password account. Passwords are stored as salted PBKDF2-SHA256 hashes and
@@ -8,7 +9,7 @@ const SESSION_DAYS = 30, ITERATIONS = 100000, MAX_FAILURES = 5, LOCK_MS = 15 * 6
 
 // Behind a TLS-terminating proxy (e.g. nginx) the Worker sees http://; X-Forwarded-Proto gives the scheme the browser used.
 // Browsers cannot set this header on cross-site requests, so honouring it keeps the origin check meaningful.
-export function publicOrigin(req: Request) { const url = new URL(req.url); const proto = req.headers.get('x-forwarded-proto')?.split(',')[0].trim(); return `${proto === 'https' || proto === 'http' ? proto + ':' : url.protocol}//${url.host}`; }
+export function publicOrigin(req: Request) { if(env.PUBLIC_ORIGIN)return applicationOrigin(req,env); const url = new URL(req.url); const proto = req.headers.get('x-forwarded-proto')?.split(',')[0].trim(); return `${proto === 'https' || proto === 'http' ? proto + ':' : url.protocol}//${url.host}`; }
 export const sameOrigin = (req: Request) => !req.headers.get('origin') || req.headers.get('origin') === publicOrigin(req);
 const readCookie = (req: Request, name: string) => req.headers.get('cookie')?.match(new RegExp(`(?:^|; )${name}=([^;]*)`))?.[1];
 const setCookie = (req: Request, name: string, value: string, maxAge: number) => `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${publicOrigin(req).startsWith('https:') ? '; Secure' : ''}`;

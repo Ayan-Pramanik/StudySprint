@@ -32,6 +32,12 @@
     "test:documents-api": "node scripts/local-run.mjs tests/documents-api.test.mjs",
     "test:offline": "node scripts/local-run.mjs --experimental-strip-types tests/offline.test.mjs",
     "test:markdown-images": "node scripts/local-run.mjs --experimental-strip-types tests/markdown-images.test.mjs",
+    "test:dictation": "node scripts/local-run.mjs --experimental-strip-types tests/dictation.test.mjs && node scripts/local-run.mjs --experimental-strip-types tests/dictation-client.test.mjs",
+    "test:speech": "python3 -m unittest speech.test_app speech.test_benchmark_metrics -v",
+    "test:judges": "node scripts/local-run.mjs --test tests/judges.test.mjs",
+    "judges:setup": "node scripts/local-run.mjs scripts/judges-setup.mjs",
+    "judges:start": "node scripts/local-run.mjs scripts/judges-run.mjs",
+    "judges:stop": "node scripts/local-run.mjs scripts/judges-stop.mjs",
     "test:routing": "node scripts/local-run.mjs --experimental-strip-types tests/routing.test.mjs",
     "test:routing-api": "node scripts/local-run.mjs tests/routing-api.test.mjs"
   },

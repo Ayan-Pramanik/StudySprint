@@ -1,0 +1,3 @@
+# Native Apple Silicon macOS / Python 3.11; tested as one complete stack.
+-r requirements.lock
+whisperlivekit[mlx-whisper]==0.2.26

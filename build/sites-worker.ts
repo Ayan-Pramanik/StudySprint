@@ -1,3 +1,5 @@
+import { handleDictation } from "../lib/server/dictation";
+import { identity } from "../lib/auth";
 import handler from "vinext/server/fetch-handler";
 import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
@@ -6,7 +8,9 @@ import { consumeImports } from "../lib/server/import-jobs";
 export default {
   async scheduled() { const {maintainDocumentFiles}=await import('../lib/server/documents'); await maintainDocumentFiles(); },
   queue(batch: MessageBatch<{id:string}|{cleanup:string[]}>) { return consumeImports(batch); },
-  fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+  async fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+    const dictation = await handleDictation(request, env, fetch, async req => (await identity(req))?.id);
+    if (dictation) return dictation;
     let binding = ctx.props?.CONNECTORS;
     // Local preview emulates the same request-scoped capability. This branch and
     // the auxiliary service binding are absent from production builds.

@@ -64,3 +64,9 @@ next-env.d.ts
 **/.pytest_cache/
 /.playwright-mcp/
 /public/pdfjs/
+
+# Private local speech runtime and downloaded models
+/speech/.venv/
+/speech/.cache/
+**/__pycache__/
+**/.pytest_cache/

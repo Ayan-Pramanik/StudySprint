@@ -2,8 +2,8 @@ import './sites-env.mjs';
 import {spawnSync} from 'node:child_process';
 import {readFileSync} from 'node:fs';
 
-export function setupDatabase(){
- const common=['scripts/local-run.mjs','--import','./scripts/sites-env.mjs','node_modules/wrangler/bin/wrangler.js','d1','execute','DB','--local','--config','dist/server/wrangler.json','--persist-to','.wrangler/state'];
+export function setupDatabase({persistTo='.wrangler/state'}={}){
+ const common=['scripts/local-run.mjs','--import','./scripts/sites-env.mjs','node_modules/wrangler/bin/wrangler.js','d1','execute','DB','--local','--config','dist/server/wrangler.json','--persist-to',persistTo];
  const inspect=spawnSync(process.execPath,[...common,'--command',"SELECT name FROM sqlite_master WHERE type='table'",'--json'],{encoding:'utf8'});
  if(inspect.status!==0)throw Error(inspect.stderr||inspect.stdout||'Cannot inspect local database.');
  let result;try{result=JSON.parse(inspect.stdout);}catch{throw Error('Unable to read the local database schema.');}
