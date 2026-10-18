@@ -38,7 +38,11 @@ export type Event = {
     at: string;
     due: string;
     introduced: boolean;
+    adventure?: boolean;
+    captured?: boolean;
+    xp?: number;
 };
+export type AdventureState = { hp: number; skills: string[] };
 export type Workspace = {
     subjects: Subject[];
     notes: Note[];
@@ -46,12 +50,13 @@ export type Workspace = {
     events: Event[];
     limit: number;
     zone: string;
+    adventure: AdventureState;
 };
-export const empty = (): Workspace => ({ subjects: [], notes: [], cards: [], events: [], limit: 10, zone: 'UTC' });
+export const empty = (): Workspace => ({ subjects: [], notes: [], cards: [], events: [], limit: 10, zone: 'UTC', adventure: { hp: 100, skills: [] } });
 export const uid = () => crypto.randomUUID();
 export const scheduler = fsrs({ enable_fuzz: false });
 export function day(at: string | Date, zone: string) { return new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(new Date(at)); }
-export function queue(w: Workspace, now = new Date(), subject = '') { const introduced = w.events.filter(e => e.introduced && day(e.at, w.zone) === day(now, w.zone)).length; const active = w.cards.filter(c => c.life === 'active' && (!subject || c.subject === subject)); return [...active.filter(c => c.schedule.state !== 0 && new Date(c.schedule.due) <= now).sort((a, b) => +new Date(a.schedule.due) - +new Date(b.schedule.due)), ...active.filter(c => c.schedule.state === 0).slice(0, Math.max(0, w.limit - introduced))]; }
+export function queue(w: Workspace, now = new Date(), subject = '') { const introduced = w.events.filter(e => e.introduced && day(e.at, w.zone) === day(now, w.zone)).length; const active = w.cards.filter(c => c.life === 'active' && (!subject || (subject === '__uncategorised' ? !c.subject : c.subject === subject))); return [...active.filter(c => c.schedule.state !== 0 && new Date(c.schedule.due) <= now).sort((a, b) => +new Date(a.schedule.due) - +new Date(b.schedule.due)), ...active.filter(c => c.schedule.state === 0).slice(0, Math.max(0, w.limit - introduced))]; }
 export function preview(c: Card, now = new Date()) { return scheduler.repeat(c.schedule, now); }
 export function rate(w: Workspace, id: string, rating: number, eventId: string, now = new Date()) {
     const previous=w.events.find(e=>e.id===eventId);

@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState, type DragEvent } from 'react';
+import { useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { ArrowDownAZ, ChevronRight, ChevronsDownUp, ChevronsUpDown, Clock, FileText, FolderPlus, Plus, Search, SquarePen } from 'lucide-react';
 import type { Note, Workspace } from '../lib/study';
 import { UNCATEGORISED } from '../lib/note-graph';
@@ -83,9 +83,29 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
 
     const visibleCount = folders.reduce((n, f) => n + f.notes.length, 0) + loose.length;
 
-    const noteRow = (n: Note, depth: number) => <li key={n.id}><button draggable onDragStart={e => { e.dataTransfer.setData('text/plain', n.title); e.dataTransfer.effectAllowed = 'move'; setDragId(n.id); }} onDragEnd={endDrag}
-        className={'tree-row tree-note' + (selected === n.id ? ' selected' : '') + (dragId === n.id ? ' dragging' : '')} style={{ paddingLeft: 10 + depth * 18 }} aria-current={selected === n.id ? 'page' : undefined} onClick={() => onSelect(n)} title={n.title}>
-        <FileText size={14} aria-hidden="true"/><span>{n.title}</span></button></li>;
+    const conceptSourceTitle = (note: Note) => note.body.match(/^Extracted from \[\[([^\]]+)\]\]\./m)?.[1];
+    const noteRows = (notes: Note[], depth: number) => {
+        const ordered = order(notes);
+        const ids = new Set(ordered.map(note => note.id));
+        const byTitle = new Map(ordered.map(note => [note.title.trim().toLocaleLowerCase(), note]));
+        const parentByChild = new Map<string, string>();
+        const childrenByParent = new Map<string, Note[]>();
+        for (const note of ordered) {
+            if (!note.body.includes('StudySprint concept graph node:')) continue;
+            const sourceTitle = conceptSourceTitle(note);
+            const parent = sourceTitle ? byTitle.get(sourceTitle.trim().toLocaleLowerCase()) : undefined;
+            if (!parent || parent.id === note.id || !ids.has(parent.id)) continue;
+            parentByChild.set(note.id, parent.id);
+            childrenByParent.set(parent.id, [...(childrenByParent.get(parent.id) || []), note]);
+        }
+        const render = (note: Note, rowDepth: number): ReactNode => <li key={note.id}>
+            <button draggable onDragStart={e => { e.dataTransfer.setData('text/plain', note.title); e.dataTransfer.effectAllowed = 'move'; setDragId(note.id); }} onDragEnd={endDrag}
+                className={'tree-row tree-note' + (selected === note.id ? ' selected' : '') + (dragId === note.id ? ' dragging' : '')} style={{ paddingLeft: 10 + rowDepth * 18 }} aria-current={selected === note.id ? 'page' : undefined} onClick={() => onSelect(note)} title={note.title}>
+                <FileText size={14} aria-hidden="true"/><span>{note.title}</span></button>
+            {!!childrenByParent.get(note.id)?.length && <ul className="tree-concepts" aria-label={`Concepts from ${note.title}`}>{order(childrenByParent.get(note.id)!).map(child => render(child, rowDepth + 1))}</ul>}
+        </li>;
+        return ordered.filter(note => !parentByChild.has(note.id)).map(note => render(note, depth));
+    };
 
     return <section className="note-browser tree" aria-label="Notes">
         <div className="tree-toolbar" role="toolbar" aria-label="Note tools">
@@ -106,10 +126,10 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
                             <ChevronRight size={14} className={open ? 'open' : ''} aria-hidden="true"/><span>{f.name}</span><small>{f.total}</small></button>
                         <button className="icon tree-add" onClick={() => onNewNote(f.id)} aria-label={`New note in ${f.name}`} title="New note in this folder"><Plus size={14}/></button>
                     </div>
-                    {open && (f.notes.length ? <ul>{f.notes.map(n => noteRow(n, 1))}</ul> : <p className="tree-empty">No notes yet</p>)}
+                    {open && (f.notes.length ? <ul>{noteRows(f.notes, 1)}</ul> : <p className="tree-empty">No notes yet</p>)}
                 </li>;
             })}
-            {loose.map(n => noteRow(n, 0))}
+            {noteRows(loose, 0)}
             {dragged && currentFolder(dragged) && <li className="tree-root-drop" aria-hidden="true">Drop here to take it out of its folder</li>}
         </ul>
         {q && !visibleCount && <p className="tree-empty">No notes match “{search}”.</p>}

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { importBackup } from '../../../lib/backup';
 import { importMarkdownNotes } from '../../../lib/markdown-notes';
 import { clozeDrafts } from '../../../lib/generation';
+import { adventureAnswerMatches } from '../../../lib/adventure';
 async function aiFetch(url: string, init: RequestInit) { let response: Response | undefined; for (let attempt = 0; attempt < 2; attempt++) {
     response = await fetch(url, { ...init, signal: AbortSignal.timeout(25000) });
     if (response.status !== 429 && response.status < 500)
@@ -22,7 +23,7 @@ export async function GET(req: Request) { const { id, cookie } = await identity(
     }
     catch {
         return 'UTC';
-    } })() })).run(); const row = await env.DB!.prepare('SELECT data,version FROM workspaces WHERE id=?').bind(id).first<any>(); const workspace = JSON.parse(row.data); const events = await env.DB!.prepare('SELECT data FROM review_events WHERE workspace=? ORDER BY rowid').bind(id).all<any>(); workspace.events = events.results.map((e: any) => JSON.parse(e.data)); return json({ workspace, version: row.version, ai: !!(env as any).AI_API_KEY }, 200, cookie); }
+    } })() })).run(); const row = await env.DB!.prepare('SELECT data,version FROM workspaces WHERE id=?').bind(id).first<any>(); const workspace = JSON.parse(row.data); workspace.adventure ||= { hp: 100, skills: [] }; const events = await env.DB!.prepare('SELECT data FROM review_events WHERE workspace=? ORDER BY rowid').bind(id).all<any>(); workspace.events = events.results.map((e: any) => JSON.parse(e.data)); return json({ workspace, version: row.version, ai: !!(env as any).AI_API_KEY }, 200, cookie); }
 export async function POST(req: Request) {
     try {
         if (req.headers.get('origin') && req.headers.get('origin') !== new URL(req.url).origin)
@@ -36,6 +37,7 @@ export async function POST(req: Request) {
             throw Error('Request is too large');
         const { action, ...p } = JSON.parse(payload);
         const w: Workspace = JSON.parse(row.data);
+        w.adventure ||= { hp: 100, skills: [] };
         const existingEvents = await env.DB!.prepare('SELECT data FROM review_events WHERE workspace=? ORDER BY rowid').bind(id).all<any>();
         w.events = existingEvents.results.map((e: any) => JSON.parse(e.data));
         const previousEventIds = new Set(w.events.map(e => e.id));
@@ -114,6 +116,26 @@ export async function POST(req: Request) {
             if (p.cards === true)
                 w.cards = w.cards.filter(c => c.note !== p.id);
         }
+        else if (action === 'createDrafts') {
+            const source = w.notes.find(n => n.id === p.noteId);
+            if (!source) throw Error('Source note unavailable');
+            const schema = z.array(z.object({ front: z.string().trim().min(3).max(4000), answer: z.string().trim().min(1).max(4000), type: z.enum(['basic', 'cloze']), excerpt: z.string().min(10).max(4000) })).min(1).max(12);
+            const drafts = schema.parse(p.cards);
+            const seen = new Set(w.cards.filter(c => c.note === source.id && c.life !== 'archived').map(c => c.front.toLocaleLowerCase().replace(/\s+/g, ' ').trim()));
+            for (const draft of drafts) {
+                if (!source.body.includes(draft.excerpt)) throw Error('A supporting passage no longer matches the source note. Regenerate the drafts and try again.');
+                if (draft.type === 'cloze' && (draft.front.match(/\[\.\.\.\]/g) || []).length !== 1) throw Error('Each cloze prompt needs exactly one [...] placeholder.');
+                const key = draft.front.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+                if (seen.has(key)) throw Error('These drafts contain a duplicate card. Remove or edit the duplicate and try again.');
+                seen.add(key);
+            }
+            for (const draft of drafts) {
+                const card = makeCard(source, draft.front, draft.answer, draft.excerpt, 'draft');
+                card.type = draft.type;
+                w.cards.push(card);
+            }
+            result = { created: drafts.length };
+        }
         else if (action === 'card') {
             const n = w.notes.find(n => n.id === p.note);
             if(p.note && !n) throw Error('Source note unavailable');
@@ -140,8 +162,49 @@ export async function POST(req: Request) {
             const c = card();
             c.sourceVersion = w.notes.find(n => n.id === c.note)?.version || c.sourceVersion;
         }
-        else if (action === 'rate')
+        else if (action === 'rate' || action === 'adventureRate') {
+            const repeated = w.events.some(e => e.id === p.eventId);
             rate(w, p.id, p.rating, str(p.eventId, 100));
+            if (action === 'adventureRate' && !repeated) {
+                const event = w.events.find(e => e.id === p.eventId)!;
+                event.adventure = true;
+                event.captured = p.rating >= 2;
+                event.xp = p.rating === 1 ? 2 : p.rating === 2 ? 5 : p.rating === 3 ? 10 : 15;
+                if (p.rating === 1) {
+                    w.adventure.hp = Math.max(0, w.adventure.hp - 25);
+                } else {
+                    w.adventure.hp = Math.min(100, w.adventure.hp + 5);
+                    if (p.rating >= 3 && Math.random() < 0.2) {
+                        const loot = ['first-letter', 'answer-length'].filter(skill => !w.adventure.skills.includes(skill));
+                        if (loot.length) {
+                            const skill = loot[Math.floor(Math.random() * loot.length)];
+                            w.adventure.skills.push(skill);
+                            result = { loot: skill };
+                        }
+                    }
+                }
+            }
+        }
+        else if (action === 'adventureTurn') {
+            const target = w.cards.find(c => c.id === p.id && c.life === 'active');
+            if (!target) throw Error('That wild concept is no longer available.');
+            if (w.adventure.hp <= 0) throw Error('You lost this battle. Recover before exploring again.');
+            const answer = z.string().trim().min(1).max(4000).parse(p.answer);
+            const correct = adventureAnswerMatches(answer, target.answer);
+            if (!correct) w.adventure.hp = Math.max(0, w.adventure.hp - 35);
+            result = { correct, hp: w.adventure.hp, damage: correct ? 0 : 35 };
+        }
+        else if (action === 'adventureRecover') {
+            if (w.adventure.hp > 0) throw Error('Recovery is available after a battle is lost.');
+            w.adventure.hp = 100;
+        }
+        else if (action === 'adventureSkill') {
+            const skill = z.enum(['first-letter', 'answer-length']).parse(p.skill);
+            if (!w.adventure.skills.includes(skill)) throw Error('That clue skill has not been unlocked yet.');
+            const cost = 10;
+            if (w.adventure.hp <= cost) throw Error('Keep at least 1 HP before using this clue.');
+            w.adventure.hp -= cost;
+        }
         else if (action === 'generate') {
             const n = note();
             const source = str(p.source || n.body, 24000);

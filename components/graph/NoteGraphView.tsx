@@ -55,7 +55,13 @@ export default function NoteGraphView({workspace,active,focusRequest,openNote,cr
  const visibleIds=useMemo(()=>new Set(visible.notes.map(n=>n.id)),[visible.notes]);
  const byId=useMemo(()=>new Map(workspace.notes.map(n=>[n.id,n])),[workspace.notes]);
  const subjectStyle=useMemo(()=>new Map(workspace.subjects.map((s,i)=>[s.id,{...s,color:palette[i%palette.length],shape:shapes[i%shapes.length]}])),[workspace.subjects]);
- const styleOf=(n:Note)=>isUncategorised(graph,n)?uncategorisedStyle:subjectStyle.get(n.subject)!;
+ const styleOf=(n:Note)=>{
+  const layer=n.body.match(/StudySprint concept graph node: similarity=\d+%; layer=(High|Medium|Low)\./)?.[1];
+  if(layer==='High')return{name:'High similarity',color:'#6260b5',shape:'ellipse'};
+  if(layer==='Medium')return{name:'Medium similarity',color:'#397d72',shape:'round-rectangle'};
+  if(layer==='Low')return{name:'Low similarity',color:'#a46b36',shape:'diamond'};
+  return isUncategorised(graph,n)?uncategorisedStyle:subjectStyle.get(n.subject)!;
+ };
  const hasUncategorised=useMemo(()=>workspace.notes.some(n=>isUncategorised(graph,n)),[graph,workspace.notes]);
  const chosen=byId.get(selected),localRoot=byId.get(root);
  const results=useMemo(()=>query.trim()?workspace.notes.filter(n=>n.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())):[],[query,workspace.notes]);
@@ -96,17 +102,30 @@ export default function NoteGraphView({workspace,active,focusRequest,openNote,cr
    cy.nodes().forEach(n=>{positions.current.set(n.id(),{...n.position()});});
    cy.json({elements});
    cy.nodes().forEach(n=>{const position=positions.current.get(n.id());if(position)n.position(position);});
-   const key=JSON.stringify([visible.notes.map(n=>n.id),visible.relationships,reset]);
+   const key=JSON.stringify([visible.notes.map(n=>[n.id,n.body.match(/StudySprint concept graph node: similarity=\d+%; layer=(High|Medium|Low)\./)?.[0]||'']),visible.relationships,reset]);
    if(key!==topology.current&&cy.nodes().length){
     setArranging(true);
     worker=new LayoutWorker();
     worker.onmessage=(event:MessageEvent<{positions?:{id:string;position:Position}[];error?:string}>)=>{
      setArranging(false);
      if(event.data.error){setError(event.data.error);worker?.terminate();return;}
-     cy.batch(()=>{for(const item of event.data.positions||[]){cy.getElementById(item.id).position(item.position);positions.current.set(item.id,item.position);}});
+     const arranged=new Map((event.data.positions||[]).map(item=>[item.id,item.position]));
+     // Imported study concepts use deliberate similarity rings around their source note.
+     const layers=visible.notes.filter(n=>n.id!==root&&/StudySprint concept graph node: similarity=\d+%; layer=(High|Medium|Low)\./.test(n.body));
+     const hasConceptRings=Boolean(root&&layers.length);
+     if(hasConceptRings){
+      arranged.set(root,{x:0,y:0});
+      for(const level of ['High','Medium','Low'] as const){
+       const group=layers.filter(n=>n.body.match(/layer=(High|Medium|Low)\./)?.[1]===level),radius=level==='High'?155:level==='Medium'?275:395;
+       const phase=level==='High'?0:level==='Medium'?.32:.64;
+       group.forEach((n,index)=>{const angle=-Math.PI/2+phase+index*Math.PI*2/Math.max(group.length,1);arranged.set(n.id,{x:Math.cos(angle)*radius,y:Math.sin(angle)*radius});});
+      }
+     }
+     cy.batch(()=>{for(const [id,position] of arranged){cy.getElementById(id).position(position);positions.current.set(id,position);}});
      topology.current=key;cy.fit(undefined,55);
-     buildSimulation(cy);physics.current.start(.5);
-     const focus=cy.getElementById(selectedRef.current);if(focus.length){cy.zoom(Math.max(.9,Math.min(cy.zoom(),1.5)));cy.center(focus);}
+     if(hasConceptRings){simRef.current=null;physics.current.stop();}
+     else{buildSimulation(cy);physics.current.start(.5);}
+     const focus=cy.getElementById(selectedRef.current);if(focus.length&&!hasConceptRings){cy.zoom(Math.max(.9,Math.min(cy.zoom(),1.5)));cy.center(focus);}
      worker?.terminate();
     };
     worker.onerror=()=>{setArranging(false);setError('The layout worker could not start. Retry, or use the accessible list.');worker?.terminate();};
@@ -136,7 +155,7 @@ export default function NoteGraphView({workspace,active,focusRequest,openNote,cr
   {query.trim()&&<section className="graph-search-results" aria-label="Search results"><p role="status">{results.length} matching {results.length===1?'note':'notes'}</p>{results.length?results.slice(0,100).map(n=><button key={n.id} onFocus={()=>setHovered(n.id)} onBlur={()=>setHovered('')} onClick={()=>pick(n.id,!visibleIds.has(n.id))}><span>{n.title}<small>{styleOf(n).name}</small></span><span>{visibleIds.has(n.id)?'Locate':'Reveal in global graph'} <ArrowRight size={14}/></span></button>):<p>No title matches. Try a shorter search.</p>}{results.length>100&&<p>Narrow your search to see more specific results.</p>}</section>}
   <div className="graph-status row"><div><span className="pill">{root?`Local · ${localRoot?.title||'Note unavailable'}`:'Global · all notes'}</span>{root&&<><label className="graph-hop-label">Distance<select aria-label="Local graph distance" value={hops} onChange={e=>setHops(Number(e.target.value) as 1|2)}><option value="1">One hop</option><option value="2">Two hops</option></select></label><button className="text-button" onClick={()=>setRoot('')}>Show global graph</button></>}</div><span aria-live="polite">{visible.notes.length} notes · {visible.relationships.length} directed connections</span></div>
   {subject&&<p className="small muted">Connections to hidden subjects are not displayed. Isolated means no connections within the current filters.</p>}
-  <div className="graph-legend" aria-label="Subject legend">{workspace.subjects.map(s=><span key={s.id}><i style={{background:subjectStyle.get(s.id)?.color}}/>{s.name}<small>({subjectStyle.get(s.id)?.shape})</small></span>)}{hasUncategorised&&<span><i style={{background:uncategorisedStyle.color}}/>{uncategorisedStyle.name}<small>({uncategorisedStyle.shape})</small></span>}<span className="graph-arrow-key">A → B: A links to B · A ↔ B: both link explicitly</span></div>
+  <div className="graph-legend" aria-label="Subject and similarity legend">{workspace.subjects.map(s=><span key={s.id}><i style={{background:subjectStyle.get(s.id)?.color}}/>{s.name}<small>({subjectStyle.get(s.id)?.shape})</small></span>)}{hasUncategorised&&<span><i style={{background:uncategorisedStyle.color}}/>{uncategorisedStyle.name}<small>({uncategorisedStyle.shape})</small></span>}{visible.notes.some(n=>/StudySprint concept graph node:/.test(n.body))&&<><span><i style={{background:'#6260b5'}}/>High similarity · inner ring</span><span><i style={{background:'#397d72'}}/>Medium · second ring</span><span><i style={{background:'#a46b36'}}/>Low · outer ring</span></>}<span className="graph-arrow-key">A → B: A links to B · A ↔ B: both link explicitly</span></div>
   {!workspace.notes.length&&<div className="empty"><Network size={32}/><h2>Your ideas will meet here.</h2><p>Create a note, then connect it with [[Note Title]].</p><button className="primary" onClick={createNote}>Create note</button></div>}
   {!!workspace.notes.length&&!graph.relationships.length&&<p className="graph-guidance">Your notes have no resolved links yet. Write [[Note Title]] in a note to connect it to another existing note.</p>}
   {!!workspace.notes.length&&!visible.notes.length&&<div className="empty"><h2>No notes match these filters.</h2><p>Try another subject, include isolated notes, or return to the global view.</p><button onClick={clearFilters}>Reset filters</button></div>}
