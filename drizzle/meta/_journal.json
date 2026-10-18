@@ -8,6 +8,13 @@
       "when": 1792212603529,
       "tag": "0000_fearless_the_hand",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792290164287,
+      "tag": "0001_accounts",
+      "breakpoints": true
     }
   ]
 }

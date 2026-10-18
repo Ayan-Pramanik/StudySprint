@@ -18,7 +18,8 @@
     "test:assets": "node scripts/local-run.mjs tests/assets.test.mjs",
     "test:graph": "node scripts/local-run.mjs --experimental-strip-types tests/graph.test.mjs",
     "test:graph-build": "node scripts/local-run.mjs tests/graph-build.test.mjs",
-    "test:pomodoro": "node scripts/local-run.mjs --experimental-strip-types tests/pomodoro.test.mjs"
+    "test:pomodoro": "node scripts/local-run.mjs --experimental-strip-types tests/pomodoro.test.mjs",
+    "test:offline": "node scripts/local-run.mjs --experimental-strip-types tests/offline.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -44,6 +45,7 @@
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.12.2",
     "recharts": "^3.8.0",
+    "remark-gfm": "^4.0.1",
     "sonner": "^2.0.8",
     "tailwind-merge": "3.6.0",
     "ts-fsrs": "^5.2.3",

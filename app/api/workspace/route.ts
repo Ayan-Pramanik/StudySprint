@@ -1,9 +1,13 @@
 import { env } from 'cloudflare:workers';
-import { empty, uid, rate, bindLinks, makeCard, type Workspace, type Note } from '../../../lib/study';
+import { empty, uid, rate, bindLinks, makeCard, normalizeTags, type Workspace, type Note } from '../../../lib/study';
 import { z } from 'zod';
 import { importBackup } from '../../../lib/backup';
 import { importMarkdownNotes } from '../../../lib/markdown-notes';
+import { importCards } from '../../../lib/card-import';
+import { importQuizzes, recordAttempt } from '../../../lib/quiz';
 import { clozeDrafts } from '../../../lib/generation';
+import { identity, sameOrigin } from '../../../lib/auth';
+const signInRequired = () => json({ error: 'Log in to open your workspace.', signIn: true }, 401);
 async function aiFetch(url: string, init: RequestInit) { let response: Response | undefined; for (let attempt = 0; attempt < 2; attempt++) {
     response = await fetch(url, { ...init, signal: AbortSignal.timeout(25000) });
     if (response.status !== 429 && response.status < 500)
@@ -12,22 +16,21 @@ async function aiFetch(url: string, init: RequestInit) { let response: Response 
         await new Promise(r => setTimeout(r, 500));
 } return response!; }
 const json = (data: unknown, status = 200, cookie?: string) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...(cookie ? { 'Set-Cookie': cookie } : {}) } });
-async function identity(req: Request) { let id = req.headers.get('cookie')?.match(/(?:^|; )ss_guest=([a-f0-9-]{36})(?:;|$)/)?.[1]; let cookie: string | undefined; if (!id) {
-    id = uid();
-    cookie = `ss_guest=${id}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${new URL(req.url).protocol === 'https:' ? '; Secure' : ''}`;
-} return { id, cookie }; }
-export async function GET(req: Request) { const { id, cookie } = await identity(req); await env.DB!.prepare('INSERT OR IGNORE INTO workspaces (id,data,version) VALUES (?,?,0)').bind(id, JSON.stringify({ ...empty(), zone: (() => { const zone = new URL(req.url).searchParams.get('zone') || 'UTC'; try {
+export async function GET(req: Request) { const who = await identity(req); if (!who) return signInRequired(); const { id, user } = who; await env.DB!.prepare('INSERT OR IGNORE INTO workspaces (id,data,version) VALUES (?,?,0)').bind(id, JSON.stringify({ ...empty(), zone: (() => { const zone = new URL(req.url).searchParams.get('zone') || 'UTC'; try {
         new Intl.DateTimeFormat('en', { timeZone: zone });
         return zone;
     }
     catch {
         return 'UTC';
-    } })() })).run(); const row = await env.DB!.prepare('SELECT data,version FROM workspaces WHERE id=?').bind(id).first<any>(); const workspace = JSON.parse(row.data); const events = await env.DB!.prepare('SELECT data FROM review_events WHERE workspace=? ORDER BY rowid').bind(id).all<any>(); workspace.events = events.results.map((e: any) => JSON.parse(e.data)); return json({ workspace, version: row.version, ai: !!(env as any).AI_API_KEY }, 200, cookie); }
+    } })() })).run(); const row = await env.DB!.prepare('SELECT data,version FROM workspaces WHERE id=?').bind(id).first<any>(); const workspace = JSON.parse(row.data); const events = await env.DB!.prepare('SELECT data FROM review_events WHERE workspace=? ORDER BY rowid').bind(id).all<any>(); workspace.events = events.results.map((e: any) => JSON.parse(e.data)); return json({ workspace, version: row.version, ai: !!(env as any).AI_API_KEY, user }); }
 export async function POST(req: Request) {
     try {
-        if (req.headers.get('origin') && req.headers.get('origin') !== new URL(req.url).origin)
+        if (!sameOrigin(req))
             return json({ error: 'Invalid origin' }, 403);
-        const { id } = await identity(req);
+        const who = await identity(req);
+        if (!who)
+            return signInRequired();
+        const { id } = who;
         const row = await env.DB!.prepare('SELECT data,version FROM workspaces WHERE id=?').bind(id).first<any>();
         if (!row)
             return json({ error: 'Reload to start your workspace.' }, 401);
@@ -53,6 +56,22 @@ export async function POST(req: Request) {
         }
         else if(action === 'import') { importBackup(w,p.backup); }
         else if (action === 'importNotes') { result = importMarkdownNotes(w, p); }
+        else if (action === 'importCards') { result = importCards(w, p); }
+        else if (action === 'importQuizzes') { result = importQuizzes(w, p); }
+        else if (action === 'quizAttempt') { result = recordAttempt(w, p); }
+        else if (action === 'quiz') {
+            const q = w.quizzes?.find(q => q.id === p.id);
+            if (!q)
+                throw Error('Quiz unavailable');
+            if (p.subject && !w.subjects.some(s => s.id === p.subject))
+                throw Error('Subject unavailable');
+            Object.assign(q, { title: name(p.title), subject: p.subject || '', updated: new Date().toISOString() });
+        }
+        else if (action === 'deleteQuiz') {
+            w.quizzes = (w.quizzes || []).filter(q => q.id !== p.id);
+            // Its attempts go too: they cannot be reviewed without the questions.
+            w.quizAttempts = (w.quizAttempts || []).filter(a => a.quiz !== p.id);
+        }
         else if (action === 'subject') {
             if (p.id) {
                 const s = w.subjects.find(s => s.id === p.id);
@@ -70,13 +89,16 @@ export async function POST(req: Request) {
                 n.subject = ''; });
             w.cards.forEach(c => { if (c.subject === p.id)
                 c.subject = ''; });
+            w.quizzes?.forEach(q => { if (q.subject === p.id)
+                q.subject = ''; });
         }
         else if (action === 'note') {
             if (!p.id && p.newSubject) { const subject = {id:uid(),name:name(p.newSubject,100)};w.subjects.push(subject);p.subject=subject.id;}
             p.subject ||= '';
             if (p.subject && !w.subjects.some(s => s.id === p.subject))
                 throw Error('Subject unavailable');
-            if (p.id) {
+            // `create` carries a client-made id (notes written offline); replaying it after a lost response updates the note instead.
+            if (p.id && (!p.create || w.notes.some(n => n.id === p.id))) {
                 const n = note();
                 if(p.expectedUpdated && p.expectedUpdated !== n.updated) throw Error("This note changed in another tab. Your unsaved text is preserved; reload the saved note before retrying.");
                 if (n.title !== p.title)
@@ -87,10 +109,11 @@ export async function POST(req: Request) {
                     n.version++;
                 }
                 w.cards.filter(c=>c.note===n.id).forEach(c=>c.subject=p.subject);
-                Object.assign(n, { title: name(p.title), body: str(p.body), subject: p.subject, updated: new Date().toISOString() });
+                // Older clients and queued offline edits may omit tags; that keeps the note's current tags.
+                Object.assign(n, { title: name(p.title), body: str(p.body), subject: p.subject, ...(p.tags !== undefined ? { tags: normalizeTags(p.tags) } : {}), updated: new Date().toISOString() });
             }
             else
-                w.notes.push({ id: uid(), title: name(p.title), body: str(p.body), subject: p.subject, aliases: [], version: 1, updated: new Date().toISOString() });
+                w.notes.push({ id: p.create ? z.string().uuid().parse(p.id) : uid(), title: name(p.title), body: str(p.body), subject: p.subject, tags: normalizeTags(p.tags), aliases: [], version: 1, updated: new Date().toISOString() });
         }
         else if (action === 'moveNote') {
             // Moves a note and its cards to another subject ('' = no subject). `updated` is left alone so an open editor's autosave stays valid.
