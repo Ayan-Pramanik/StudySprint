@@ -126,6 +126,17 @@ Create a note and subject → write a few explanatory sentences → wait for Sav
 
 Settings is available from the main navigation on desktop and mobile, including subject management. Subject-filtered reviews enforce the daily new-card limit without rejecting cards simply because another subject appears earlier in the global queue.
 
+## Progress and Insights
+
+**Progress** now includes quizzes: attempts, questions answered, overall quiz accuracy and quizzes taken; a progress bar per quiz (best full attempt, with a marker at the latest score and a trend arrow from the first full attempt); and the last 10 quiz scores.
+
+**Insights** gathers everything that needs another look, filterable by subject:
+
+- Totals for quiz questions to revisit, flashcards that need work, quiz accuracy and flashcard recall (share of reviews rated Good or Easy), plus a by-subject table.
+- **Quiz questions you keep missing**: questions wrong at the latest attempt or at least half the time, grouped by quiz, with how often they were missed, the correct answer and the wrong answer chosen most often. **Practise these** opens the quiz with only those questions.
+- **Flashcards that need work**: active or suspended cards forgotten (rated Again) three or more times, in at least 40% of reviews, or at the last review, rated Hard at least half the time, or with FSRS difficulty of 8/10 or more, worst first, with **Edit** and **Source**.
+- Everything is derived from saved review events and quiz attempts; nothing extra is stored.
+
 ## Flashcard import
 
 **Settings → Your data → Import flashcards** adds cards in bulk from a `.csv`, `.tsv` or `.txt` file (up to 2.8 MB and 5,000 cards), or from pasted text. Each row is one card: prompt in the first column, answer in the second; other columns are ignored and a header row such as `Front,Back` is skipped.
