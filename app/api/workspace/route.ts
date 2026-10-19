@@ -17,7 +17,13 @@ async function identity(req: Request) { let id = req.headers.get('cookie')?.matc
     id = uid();
     cookie = `ss_guest=${id}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${new URL(req.url).protocol === 'https:' ? '; Secure' : ''}`;
 } return { id, cookie }; }
-export async function GET(req: Request) { const { id, cookie } = await identity(req); await env.DB!.prepare('INSERT OR IGNORE INTO workspaces (id,data,version) VALUES (?,?,0)').bind(id, JSON.stringify({ ...empty(), zone: (() => { const zone = new URL(req.url).searchParams.get('zone') || 'UTC'; try {
+
+async function setupDb(db: any) {
+    await db.prepare("CREATE TABLE IF NOT EXISTS review_events (id text PRIMARY KEY NOT NULL, workspace text NOT NULL, data text NOT NULL)").run();
+    await db.prepare("CREATE TABLE IF NOT EXISTS workspaces (id text PRIMARY KEY NOT NULL, data text NOT NULL, version integer DEFAULT 0 NOT NULL, mutation text)").run();
+}
+
+export async function GET(req: Request) { await setupDb((env as any).DB); const { id, cookie } = await identity(req); await env.DB!.prepare('INSERT OR IGNORE INTO workspaces (id,data,version) VALUES (?,?,0)').bind(id, JSON.stringify({ ...empty(), zone: (() => { const zone = new URL(req.url).searchParams.get('zone') || 'UTC'; try {
         new Intl.DateTimeFormat('en', { timeZone: zone });
         return zone;
     }
@@ -26,6 +32,7 @@ export async function GET(req: Request) { const { id, cookie } = await identity(
     } })() })).run(); const row = await env.DB!.prepare('SELECT data,version FROM workspaces WHERE id=?').bind(id).first<any>(); const workspace = JSON.parse(row.data); workspace.adventure ||= { hp: 100, skills: [] }; const events = await env.DB!.prepare('SELECT data FROM review_events WHERE workspace=? ORDER BY rowid').bind(id).all<any>(); workspace.events = events.results.map((e: any) => JSON.parse(e.data)); return json({ workspace, version: row.version, ai: !!(env as any).AI_API_KEY }, 200, cookie); }
 export async function POST(req: Request) {
     try {
+        await setupDb((env as any).DB);
         if (req.headers.get('origin') && req.headers.get('origin') !== new URL(req.url).origin)
             return json({ error: 'Invalid origin' }, 403);
         const { id } = await identity(req);
