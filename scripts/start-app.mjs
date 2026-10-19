@@ -9,7 +9,7 @@ const path='.sites-runtime/converter.env';mkdirSync('.sites-runtime',{recursive:
 function parse(text){const values={};for(const line of text.split('\n')){const m=/^([A-Z_][A-Z_0-9]*)=(.*)$/.exec(line.trim());if(m){try{values[m[1]]=JSON.parse(m[2]);}catch{values[m[1]]=m[2];}}}return values;}
 const vars={...(existsSync('dist/server/.dev.vars')?parse(readFileSync('dist/server/.dev.vars','utf8')):{}),...(existsSync(path)?parse(readFileSync(path,'utf8')):{})};
 vars.CONVERTER_URL=process.env.CONVERTER_URL||vars.CONVERTER_URL||'http://127.0.0.1:8001';vars.CONVERTER_SECRET=process.env.CONVERTER_SECRET||vars.CONVERTER_SECRET||randomBytes(32).toString('hex');vars.OCR_LANGUAGES=process.env.OCR_LANGUAGES||vars.OCR_LANGUAGES||'eng';
-for(const key of ['AI_API_KEY','AI_MODEL'])if(process.env[key])vars[key]=process.env[key];
+for(const key of ['AI_API_KEY','AI_MODEL','PUBLIC_ORIGIN','SPEECH_SERVICE_URL','SPEECH_SERVICE_SECRET'])if(process.env[key])vars[key]=process.env[key];
 const text=Object.entries(vars).map(([key,value])=>`${key}=${JSON.stringify(value)}`).join('\n')+'\n';writeFileSync(path,text,{mode:0o600});writeFileSync('dist/server/.dev.vars',text,{mode:0o600});
 setupDatabase();
 const children=[];let stopping=false;function stop(signal='SIGTERM'){if(stopping)return;stopping=true;for(const child of children)child.kill(signal);}
