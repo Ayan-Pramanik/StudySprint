@@ -1,6 +1,8 @@
 # StudySprint
 
 **Connect your notes. Remember what matters.**
+<img width="1720" height="1228" alt="image" src="https://github.com/user-attachments/assets/6a9f4d6d-da12-4fee-97fc-f306a3d29fe7" />
+
 
 A persistent study application for your own material: document uploads with OCR, original-file and split readers, linked Markdown notes, source-based flashcard drafts, approval, FSRS reviews, version history, and portable backups including original files. No sample workspace or canned generation is included.
 
