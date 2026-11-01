@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 import WorkspaceApp from "../components/WorkspaceApp";
 import { THEME_SCRIPT } from "../lib/theme";

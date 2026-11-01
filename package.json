@@ -39,7 +39,8 @@
     "judges:start": "node scripts/local-run.mjs scripts/judges-run.mjs",
     "judges:stop": "node scripts/local-run.mjs scripts/judges-stop.mjs",
     "test:routing": "node scripts/local-run.mjs --experimental-strip-types tests/routing.test.mjs",
-    "test:routing-api": "node scripts/local-run.mjs tests/routing-api.test.mjs"
+    "test:routing-api": "node scripts/local-run.mjs tests/routing-api.test.mjs",
+    "test:markdown": "node scripts/local-run.mjs --experimental-strip-types tests/note-markdown.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -54,6 +55,7 @@
     "drizzle-orm": "0.45.2",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
+    "katex": "0.16.47",
     "lucide-react": "^1.31.0",
     "mermaid": "^12.1.0",
     "next": "16.3.4",
@@ -67,7 +69,10 @@
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.12.2",
     "recharts": "^3.8.0",
+    "rehype-katex": "^7.0.1",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "remark-parse": "11.0.0",
     "sonner": "^2.0.8",
     "tailwind-merge": "3.6.0",
