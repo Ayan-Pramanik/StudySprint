@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Pause, Play, RotateCcw, SkipForward, Maximize, Minimize, Timer, ShieldCheck } from 'lucide-react';
+import { Bell, Pause, Play, RotateCcw, SkipForward, Maximize, Minimize, Timer, ShieldCheck } from 'lucide-react';
+import { notify, notifySystem } from '../lib/notifications';
 import { type Phase, type PomodoroSettings, type PomodoroState, back, cleanSettings, completedToday, defaultSettings, duration, focusDays, formatDuration, formatTime, initial, leave, locked, pause, phaseLabel, remaining, reset, skip, start, tick } from '../lib/pomodoro';
 
 // Per-browser state, like the theme: the timer belongs to this device, not the workspace.
@@ -42,10 +43,17 @@ function chime(finished: Phase) {
         notes.forEach((f, i) => { const o = audio!.createOscillator(), g = audio!.createGain(), t = audio!.currentTime + i * .28; o.frequency.value = f; g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.25, t + .02); g.gain.exponentialRampToValueAtTime(.0001, t + .25); o.connect(g).connect(audio!.destination); o.start(t); o.stop(t + .26); });
     } catch { /* sound is optional */ }
 }
+/** Toast (and, when allowed and the page is in the background, a system notification) for a finished phase. */
+function announce(finished: Phase, next: Phase) {
+    const title = finished === 'focus' ? 'Focus round complete' : `${phaseLabel[finished]} is over`;
+    const message = finished === 'focus' ? `Nice work. Start your ${phaseLabel[next].toLowerCase()} when you’re ready.` : 'Start your next focus round when you’re ready.';
+    notify({ kind: 'timer', title, message });
+    notifySystem(title, message);
+}
 function step() {
     const { state, settings } = current();
     const r = tick(state, settings, Date.now());
-    if (r.finished) { commit(r.state); chime(r.finished); }
+    if (r.finished) { commit(r.state); chime(r.finished); announce(r.finished, r.state.phase); }
     // Idle timers have nothing to count down.
     else if (state.status !== 'idle') { snapshot = { ...current(), now: Date.now() }; emit(); }
 }
@@ -69,8 +77,8 @@ export const pomodoro = {
         update(start(current().state, Date.now()));
     },
     pause() { update(pause(current().state, Date.now())); },
-    reset() { commit(reset(current().state, current().settings)); },
-    skip() { commit(skip(current().state, current().settings, Date.now())); },
+    reset() { commit(reset(current().state, current().settings)); notify({ kind: 'timer', message: 'Timer reset.' }); },
+    skip() { const from = current().state.phase; commit(skip(current().state, current().settings, Date.now())); notify({ kind: 'timer', message: `Skipped ${phaseLabel[from].toLowerCase()}. Next: ${phaseLabel[current().state.phase].toLowerCase()}.` }); },
     leave() { update(leave(current().state, current().settings, Date.now())); },
     back() { const r = back(current().state, Date.now()); if (r.away) commit(r.state); return r; },
     settings(next: Partial<PomodoroSettings>) {
@@ -133,6 +141,17 @@ export function PomodoroChip({ open }: { open: () => void }) {
         {state.status === 'paused' ? <Pause size={13}/> : <Timer size={13}/>}<span>{formatTime(remaining(state, now))}</span></button>;
 }
 
+type Permission = NotificationPermission | 'unsupported';
+const permissionListeners = new Set<() => void>();
+function permission(): Permission { return typeof Notification === 'undefined' ? 'unsupported' : Notification.permission; }
+function DesktopNotifications() {
+    const state = useSyncExternalStore(l => { permissionListeners.add(l); return () => { permissionListeners.delete(l); }; }, permission, () => 'unsupported' as Permission);
+    if (state === 'unsupported') return null;
+    if (state === 'granted') return <p className="small"><Bell size={13}/> Desktop notifications are on: you’ll be told when a round ends while StudySprint is in the background.</p>;
+    if (state === 'denied') return <p className="small"><Bell size={13}/> Desktop notifications are blocked for this site. Allow them in your browser’s site settings to be told when a round ends in the background.</p>;
+    return <button className="text-button" onClick={() => void Notification.requestPermission().then(() => permissionListeners.forEach(l => l())).catch(() => {})}><Bell size={14}/>Notify me when a round ends, even in another tab</button>;
+}
+
 function onFullscreen(l: () => void) { document.addEventListener('fullscreenchange', l); return () => document.removeEventListener('fullscreenchange', l); }
 
 export function FocusTimer() {
@@ -164,6 +183,7 @@ export function FocusTimer() {
         <aside><section className="panel"><h2>This session</h2><div className="focus-stats"><div><strong>{completedToday(state, now)}</strong><small>focus rounds today</small></div><div><strong>{state.interruptions}</strong><small>interruptions</small></div><div><strong>{formatTime(state.awayMs)}</strong><small>time away</small></div></div></section>
             <section className="panel"><h2>Timer settings</h2>{!idle && <p className="small">Reset or finish the current round to change these.</p>}
                 <div className="focus-fields">{field('focus', 'Focus (min)', 120)}{field('short', 'Short break (min)', 60)}{field('long', 'Long break (min)', 60)}{field('rounds', 'Rounds before long break', 12)}</div>
+                <DesktopNotifications/>
                 <label className="checkbox"><input type="checkbox" checked={settings.pauseAway} onChange={e => pomodoro.settings({ pauseAway: e.target.checked })}/>Pause the timer while I’m away from this tab</label>
                 <p className="small">Saved in this browser. Browsers don’t allow a page to block switching tabs or apps; this timer asks before the page closes and makes time away visible.</p></section></aside></div></>;
 }

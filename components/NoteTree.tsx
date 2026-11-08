@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type DragEvent } from 'react';
-import { ArrowDownAZ, ChevronRight, ChevronsDownUp, ChevronsUpDown, Clock, Download, FileText, FolderPlus, Plus, Search, SquarePen, Upload } from 'lucide-react';
+import { ArrowDownAZ, ChevronRight, ChevronsDownUp, ChevronsUpDown, Clock, Download, FileText, FolderPlus, Plus, Search, SquarePen, Trash2, Upload } from 'lucide-react';
 import type { NoteSummary, WorkspaceSnapshot } from '../lib/study';
 import { UNCATEGORISED } from '../lib/note-graph';
 import { NoteLink } from './NoteLink';
@@ -22,6 +22,8 @@ type Props = {
     onExport?: () => void;
     /** Drop a note on a folder (subject id) or on the root (''). */
     onMove: (note: NoteSummary, subject: string) => void;
+    /** Asks to delete a note (the caller confirms first). */
+    onDelete: (note: NoteSummary) => void;
 };
 const ROOT = '\u0000root';
 
@@ -36,7 +38,7 @@ function savePrefs(collapsed: Set<string>, sort: Sort) { try { localStorage.setI
 const byName = (a: { name?: string; title?: string }, b: { name?: string; title?: string }) => (a.name ?? a.title ?? '').localeCompare(b.name ?? b.title ?? '', undefined, { numeric: true, sensitivity: 'base' });
 
 /** Folder view of the notes: subjects are folders, notes without a subject sit at the root. */
-export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFolder, onNewNote, onNewFolder, onImport, onExport, onMove }: Props) {
+export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFolder, onNewNote, onNewFolder, onImport, onExport, onMove, onDelete }: Props) {
     const [prefs] = useState(readPrefs);
     const [collapsed, setCollapsed] = useState(() => new Set(prefs.collapsed));
     const [sort, setSort] = useState<Sort>(prefs.sort);
@@ -91,9 +93,10 @@ export function NoteTree({ w, selected, folder, search, onSearch, onSelect, onFo
 
     const visibleCount = folders.reduce((n, f) => n + f.notes.length, 0) + loose.length;
 
-    const noteRow = (n: NoteSummary, depth: number) => <li key={n.id}><NoteLink id={n.id} draggable onDragStart={e => { e.dataTransfer.setData('text/plain', n.title); e.dataTransfer.effectAllowed = 'move'; setDragId(n.id); }} onDragEnd={endDrag}
+    const noteRow = (n: NoteSummary, depth: number) => <li key={n.id} className="tree-note-item"><NoteLink id={n.id} draggable onDragStart={e => { e.dataTransfer.setData('text/plain', n.title); e.dataTransfer.effectAllowed = 'move'; setDragId(n.id); }} onDragEnd={endDrag}
         className={'tree-row tree-note' + (selected === n.id ? ' selected' : '') + (dragId === n.id ? ' dragging' : '')} style={{ paddingLeft: 10 + depth * 18 }} aria-current={selected === n.id ? 'page' : undefined} onOpen={() => onSelect(n)} title={n.title}>
-        <FileText size={14} aria-hidden="true"/><span>{n.title}</span></NoteLink></li>;
+        <FileText size={14} aria-hidden="true"/><span>{n.title}</span></NoteLink>
+        <button className="icon tree-delete" onClick={() => onDelete(n)} aria-label={`Delete ${n.title}`} title="Delete note"><Trash2 size={14}/></button></li>;
 
     return <section className="note-browser tree" aria-label="Notes">
         <div className="tree-toolbar" role="toolbar" aria-label="Note tools">

@@ -1,11 +1,12 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, ArrowRight, Check, CircleCheck, CircleX, Download, ListChecks, MoreHorizontal, RotateCcw, Shuffle, Trophy, Upload } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CircleCheck, CircleX, Download, History, ListChecks, MoreHorizontal, RotateCcw, Shuffle, Trophy, Upload } from 'lucide-react';
+import { type Run, activeQuiz, clearActive, clearRun, loadRun, runProgress, saveRun } from '../lib/quiz-progress';
+import { notify } from '../lib/notifications';
 import type { WorkspaceSnapshot } from '../lib/study';
 import { type DraftQuiz, type Quiz, type QuizAnswer, type QuizAttempt, type QuizParse, TEMPLATE_CSV, describeAnswer, describeCorrect, grade, isChoice, letter, parseQuizFile, LIMITS } from '../lib/quiz';
 
 type Mutate = (action: string, data: object) => Promise<WorkspaceSnapshot>;
-type Run = { quiz: string; order: string[]; mode: 'practice' | 'test'; index: number; answers: Record<string, QuizAnswer>; checked: Record<string, boolean>; started: number; id: string };
 type View = { kind: 'list' } | { kind: 'setup'; quiz: string; only?: string[] } | { kind: 'run'; run: Run } | { kind: 'result'; attempt: QuizAttempt; saved: 'saving' | 'saved' | 'failed'; answers?: Record<string, QuizAnswer> } | { kind: 'history'; quiz: string };
 const UNSORTED = '__none';
 const percent = (score: number, total: number) => total ? Math.round(score / total * 100) : 0;
@@ -16,9 +17,24 @@ function download(name: string, content: string, type: string) { const url = URL
 export const downloadQuizTemplate = () => download('studysprint-quiz-template.csv', TEMPLATE_CSV, 'text/csv');
 
 export function QuizTab({ w, mutate, upload, confirm, modal, launch }: { w: WorkspaceSnapshot; mutate: Mutate; upload: () => void; confirm: (title: string, description: string, action: () => void) => void; modal: (node?: ReactNode) => void; /** Opens straight into a quiz's start screen, e.g. to practise questions picked in Insights. */ launch?: { quiz: string; only?: string[] } }) {
-    const [view, setView] = useState<View>(() => launch ? { kind: 'setup', ...launch } : { kind: 'list' });
-    const [subject, setSubject] = useState('');
     const quizzes = w.quizzes || [], attempts = w.quizAttempts || [];
+    // An attempt left open when switching away from Quiz (or reloading) reopens where it was.
+    const [view, setView] = useState<View>(() => {
+        if (launch) return { kind: 'setup', ...launch };
+        const id = activeQuiz(), quiz = id && quizzes.find(q => q.id === id);
+        const run = quiz ? loadRun(quiz) : undefined;
+        return run ? { kind: 'run', run } : { kind: 'list' };
+    });
+    const [subject, setSubject] = useState('');
+    // Every change to an attempt is saved; leaving the attempt for the list keeps it but stops it reopening by itself.
+    const viewRef = useRef(view);
+    useEffect(() => { viewRef.current = view; if (view.kind === 'run') saveRun(view.run, true); else clearActive(); }, [view]);
+    useEffect(() => {
+        // Also saved when the tab is hidden, the page closes, or the Quiz tab unmounts, so time spent is accurate.
+        const flush = () => { const v = viewRef.current; if (v.kind === 'run') saveRun(v.run, true); };
+        window.addEventListener('pagehide', flush); document.addEventListener('visibilitychange', flush);
+        return () => { flush(); window.removeEventListener('pagehide', flush); document.removeEventListener('visibilitychange', flush); };
+    }, []);
     const byId = (id: string) => quizzes.find(q => q.id === id);
     const known = new Set(w.subjects.map(s => s.id));
     const groupOf = (q: Quiz) => q.subject && known.has(q.subject) ? q.subject : UNSORTED;
@@ -28,6 +44,8 @@ export function QuizTab({ w, mutate, upload, confirm, modal, launch }: { w: Work
         const answers = Object.fromEntries(run.order.map(id => { const q = quiz.questions.find(q => q.id === id)!; return [id, run.answers[id] ?? (isChoice(q) ? [] : '')]; }));
         const results = run.order.map(id => ({ question: id, answer: answers[id], correct: grade(quiz.questions.find(q => q.id === id)!, answers[id]) }));
         const attempt: QuizAttempt = { id: run.id, quiz: quiz.id, at: new Date().toISOString(), mode: run.mode, seconds: Math.round((Date.now() - run.started) / 1000), results, score: results.filter(r => r.correct).length, total: results.length };
+        clearRun(quiz.id);
+        viewRef.current = { kind: 'list' };
         setView({ kind: 'result', attempt, saved: 'saving', answers });
         save(attempt, answers);
     }
@@ -46,8 +64,8 @@ export function QuizTab({ w, mutate, upload, confirm, modal, launch }: { w: Work
     }
 
     // Each view needs its quiz; one deleted meanwhile (here or on another device) falls through to the list.
-    if (view.kind === 'setup') { const quiz = byId(view.quiz); if (quiz) return <QuizSetup quiz={quiz} only={view.only} back={() => setView({ kind: 'list' })} start={(mode, shuffle) => { const ids = view.only || quiz.questions.map(q => q.id); setView({ kind: 'run', run: { quiz: quiz.id, order: shuffle ? shuffled(ids) : ids, mode, index: 0, answers: {}, checked: {}, started: Date.now(), id: crypto.randomUUID() } }); }}/>; }
-    if (view.kind === 'run') { const quiz = byId(view.run.quiz); if (quiz) return <QuizRunner quiz={quiz} run={view.run} update={run => setView({ kind: 'run', run })} finish={finish} confirm={confirm} exit={() => confirm('Leave this quiz?', 'Your answers so far will not be saved.', () => setView({ kind: 'list' }))}/>; }
+    if (view.kind === 'setup') { const quiz = byId(view.quiz); if (quiz) return <QuizSetup quiz={quiz} only={view.only} saved={loadRun(quiz)} resume={run => setView({ kind: 'run', run: loadRun(quiz) ?? run })} back={() => setView({ kind: 'list' })} start={(mode, shuffle) => { const ids = view.only || quiz.questions.map(q => q.id); setView({ kind: 'run', run: { quiz: quiz.id, order: shuffle ? shuffled(ids) : ids, mode, index: 0, answers: {}, checked: {}, started: Date.now(), id: crypto.randomUUID() } }); }}/>; }
+    if (view.kind === 'run') { const quiz = byId(view.run.quiz); if (quiz) return <QuizRunner quiz={quiz} run={view.run} update={run => setView({ kind: 'run', run })} finish={finish} confirm={confirm} exit={() => { saveRun(view.run, false); const p = runProgress(view.run); setView({ kind: 'list' }); notify({ kind: 'success', title: 'Progress saved', message: `“${quiz.title}”: ${p.done} of ${plural(p.total, 'question')} done. Resume from the quiz card any time.` }); }}/>; }
     if (view.kind === 'result') { const quiz = byId(view.attempt.quiz); if (quiz) return <QuizResults quiz={quiz} attempt={view.attempt} saved={view.saved} retrySave={view.answers ? () => { setView({ ...view, saved: 'saving' }); save(view.attempt, view.answers!); } : undefined}
         retry={only => setView({ kind: 'setup', quiz: quiz.id, only })} back={() => setView({ kind: 'list' })} history={() => setView({ kind: 'history', quiz: quiz.id })}/>; }
     if (view.kind === 'history') { const quiz = byId(view.quiz); if (quiz) return <QuizHistory quiz={quiz} attempts={attempts.filter(a => a.quiz === quiz.id)} open={attempt => setView({ kind: 'result', attempt, saved: 'saved' })} start={() => setView({ kind: 'setup', quiz: quiz.id })} back={() => setView({ kind: 'list' })}/>; }
@@ -60,22 +78,25 @@ export function QuizTab({ w, mutate, upload, confirm, modal, launch }: { w: Work
             {groups.length > 1 && <div className="quiz-filter" role="tablist" aria-label="Filter quizzes by subject">{[{ id: '', name: 'All subjects', count: quizzes.length }, ...groups.map(g => ({ id: g.id, name: g.name, count: g.quizzes.length }))].map(g => <button key={g.id} role="tab" aria-selected={subject === g.id} className={subject === g.id ? 'selected' : ''} onClick={() => setSubject(g.id)}>{g.name}<span>{g.count}</span></button>)}</div>}
             {shown.map(g => <section key={g.id} className="quiz-group" aria-label={g.name}><div className="section-heading"><h2>{g.name} <span className="number">{g.quizzes.length}</span></h2></div><div className="quiz-grid">{g.quizzes.map(q => {
                 const mine = attempts.filter(a => a.quiz === q.id), last = mine.at(-1), full = mine.filter(a => a.total === q.questions.length);
+                const saved = loadRun(q), progress = saved && runProgress(saved);
                 const best = full.length ? Math.max(...full.map(a => percent(a.score, a.total))) : undefined;
                 return <article key={q.id} className="quiz-card"><div className="row"><span className="subject-icon"><ListChecks size={18}/></span><button className="icon" aria-label={`Edit or delete ${q.title}`} onClick={() => manage(q)}><MoreHorizontal size={17}/></button></div>
                     <h3>{q.title}</h3><p className="small">{plural(q.questions.length, 'question')}</p>
+                    {saved && progress && <p className="quiz-resume-note"><History size={13}/>In progress · {progress.done} of {progress.total} done · {saved.mode === 'practice' ? 'Practice' : 'Test'}</p>}
                     <div className="quiz-stats">{last ? <>{best !== undefined && <span><Trophy size={13}/>Best <strong>{best}%</strong></span>}<span>Last {percent(last.score, last.total)}%</span><span>{plural(mine.length, 'attempt')}</span></> : <span>Not attempted yet</span>}</div>
-                    <div className="actions"><button className="primary" onClick={() => setView({ kind: 'setup', quiz: q.id })}>Start<ArrowRight size={15}/></button>{last && <button onClick={() => setView({ kind: 'history', quiz: q.id })}>Review</button>}</div></article>;
+                    <div className="actions">{saved ? <><button className="primary" onClick={() => setView({ kind: 'run', run: loadRun(q) ?? saved })}>Resume<ArrowRight size={15}/></button><button onClick={() => setView({ kind: 'setup', quiz: q.id })}>Start over</button></> : <button className="primary" onClick={() => setView({ kind: 'setup', quiz: q.id })}>Start<ArrowRight size={15}/></button>}{last && <button onClick={() => setView({ kind: 'history', quiz: q.id })}>Review</button>}</div></article>;
             })}</div></section>)}
         </>}
     </>;
 }
 
-function QuizSetup({ quiz, only, back, start }: { quiz: Quiz; only?: string[]; back: () => void; start: (mode: 'practice' | 'test', shuffle: boolean) => void }) {
+function QuizSetup({ quiz, only, saved, resume, back, start }: { quiz: Quiz; only?: string[]; saved?: Run; resume: (run: Run) => void; back: () => void; start: (mode: 'practice' | 'test', shuffle: boolean) => void }) {
     const [mode, setMode] = useState<'practice' | 'test'>('practice');
     const [shuffle, setShuffle] = useState(!only);
     const count = only?.length ?? quiz.questions.length;
     return <div className="quiz-run">
         <button className="text-button quiz-back" onClick={back}><ArrowLeft size={15}/>All quizzes</button>
+        {saved && (() => { const p = runProgress(saved); return <div className="quiz-resume panel"><History size={18}/><div className="grow"><strong>You have an unfinished attempt</strong><p className="small">{p.done} of {plural(p.total, 'question')} done · {saved.mode === 'practice' ? 'Practice' : 'Test'} · question {saved.index + 1}. Starting a new attempt replaces it.</p></div><button className="primary" onClick={() => resume(saved)}>Resume<ArrowRight size={15}/></button></div>; })()}
         <section className="panel quiz-setup"><div className="eyebrow">{only ? 'PRACTISE SELECTED QUESTIONS' : 'READY WHEN YOU ARE'}</div><h1>{quiz.title}</h1><p>{plural(count, 'question')}{only && only.length < quiz.questions.length ? ` of ${quiz.questions.length}` : ''}.</p>
             <div className="quiz-modes" role="radiogroup" aria-label="Quiz mode">{([['practice', 'Practice', 'Check each answer as you go, with explanations.'], ['test', 'Test', 'Answer everything first, then see your score.']] as const).map(([value, label, text]) => <button key={value} role="radio" aria-checked={mode === value} className={mode === value ? 'selected' : ''} onClick={() => setMode(value)}><strong>{label}</strong><span>{text}</span></button>)}</div>
             <label className="checkbox"><input type="checkbox" checked={shuffle} onChange={e => setShuffle(e.target.checked)}/><Shuffle size={14}/>Shuffle question order</label>
@@ -113,7 +134,7 @@ function QuizRunner({ quiz, run, update, finish, confirm, exit }: { quiz: Quiz; 
     }, [q.id, choice, q.options.length, run.mode]);
     const label = run.mode === 'practice' && !locked ? 'Check answer' : last ? (run.mode === 'practice' ? 'See results' : 'Finish quiz') : 'Next question';
     return <div className="quiz-run">
-        <div className="quiz-run-top"><button className="text-button quiz-back" onClick={exit}><ArrowLeft size={15}/>Exit</button><span className="quiz-run-title">{quiz.title}</span><span className="small muted">{run.mode === 'practice' ? 'Practice' : 'Test'} · {run.index + 1} / {run.order.length}</span></div>
+        <div className="quiz-run-top"><button className="text-button quiz-back" onClick={exit} title="Your answers are kept; resume from the quiz card"><ArrowLeft size={15}/>Save &amp; exit</button><span className="quiz-run-title">{quiz.title}</span><span className="small muted">{run.mode === 'practice' ? 'Practice' : 'Test'} · {run.index + 1} / {run.order.length}</span></div>
         <div className="quiz-progress" role="progressbar" aria-label="Quiz progress" aria-valuemin={0} aria-valuemax={run.order.length} aria-valuenow={run.index + 1}><i style={{ width: `${(run.index + (locked || run.mode === 'test' && has ? 1 : 0)) / run.order.length * 100}%` }}/></div>
         <section className="panel quiz-question" aria-live="polite">
             <div className="eyebrow">QUESTION {run.index + 1} · {choice ? multi ? 'SELECT ALL THAT APPLY' : 'CHOOSE ONE' : 'TYPE YOUR ANSWER'}</div>

@@ -3,6 +3,7 @@ import "katex/dist/katex.min.css";
 import "./globals.css";
 import WorkspaceApp from "../components/WorkspaceApp";
 import { THEME_SCRIPT } from "../lib/theme";
+import { FONT_SCRIPT } from "../lib/font-size";
 export const metadata: Metadata = {
     title: "StudySprint",
     description: "Connect your notes. Remember what matters.",
@@ -15,7 +16,7 @@ export default function RootLayout({ children, }: Readonly<{
     children: React.ReactNode;
 }>) {
     return (<html lang="en" suppressHydrationWarning>
-      <head><script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }}/></head>
+      <head><script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT + FONT_SCRIPT }}/></head>
       <body className="antialiased"><WorkspaceApp>{children}</WorkspaceApp></body>
     </html>);
 }
