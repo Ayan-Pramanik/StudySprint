@@ -69,6 +69,24 @@ function DiagramViewer({ svg, onClose }: { svg: string; onClose: () => void }) {
 }
 
 /** Renders a ```mermaid block. Mermaid is loaded only when a note contains a diagram. */
+
+/**
+ * Where Mermaid draws a diagram before it is shown. Without one it adds a temporary element to the
+ * end of <body>, which makes the page taller for a moment: the page scrollbar flickers on and off
+ * and the whole layout shifts sideways while a note's diagrams render. A fixed, off-screen element
+ * is still laid out (Mermaid measures its labels) but never changes the page's size.
+ */
+let stageElement: HTMLElement | undefined;
+function stage() {
+    if (!stageElement?.isConnected) {
+        stageElement = document.createElement('div');
+        stageElement.setAttribute('aria-hidden', 'true');
+        stageElement.style.cssText = 'position:fixed;left:-100000px;top:0;width:1600px;visibility:hidden;pointer-events:none;contain:layout style';
+        document.body.appendChild(stageElement);
+    }
+    return stageElement;
+}
+
 export function MermaidDiagram({ source }: { source: string }) {
     const theme = useTheme();
     const id = 'mermaid-' + useId().replace(/[^a-zA-Z0-9-]/g, '');
@@ -88,7 +106,7 @@ export function MermaidDiagram({ source }: { source: string }) {
                     themeVariables: { ...palettes[theme === 'dark' ? 'dark' : 'light'], fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif', fontSize: '14px' },
                     flowchart: { curve: 'basis', padding: 14, nodeSpacing: 40, rankSpacing: 48 },
                 });
-                const { svg } = await mermaid.render(id, source);
+                const { svg } = await mermaid.render(id, source, stage());
                 if (!cancelled) setResult({ svg });
             } catch (e) {
                 // A failed render can leave Mermaid's temporary element behind.
