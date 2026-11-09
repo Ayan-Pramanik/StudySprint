@@ -9,9 +9,23 @@ import { LOST_DIAGRAM } from '../lib/pasted-diagrams';
 let renders = Promise.resolve();
 
 /* Diagram colours: deep-blue rounded nodes and light grey connectors, matching chat-style diagrams. */
+/*
+ * Mind maps (and other diagrams that colour by branch) use cScale0–11 for branches and git0 for the
+ * centre. Left unset, Mermaid derives them from the deep-blue node colour, which turns near-black in
+ * dark mode. Each branch gets its own colour, a readable label colour, and a darker underline.
+ */
+const branches = (fills: string[], label: string, under: string[], root: string, rootLabel: string) => Object.fromEntries([
+    ...fills.map((c, i) => ['cScale' + i, c]), ...fills.map((_, i) => ['cScaleLabel' + i, label]), ...under.map((c, i) => ['cScaleInv' + i, c]),
+    ...Array.from({ length: 8 }, (_, i) => [['git' + i, i ? fills[i] : root], ['gitBranchLabel' + i, i ? label : rootLabel], ['gitInv' + i, i ? under[i] : root]]).flat(),
+]);
+const DARK_BRANCHES = branches(['#2f5d9e', '#2e7a62', '#7d4f9a', '#9a6330', '#2d7590', '#9a4462', '#5a7a30', '#5d50a8', '#2f6a86', '#86762e', '#3f7a52', '#7a4486'],
+    '#f3f6ff', ['#1f3f6e', '#1f5544', '#56356b', '#6b4420', '#1e5164', '#6b2f44', '#3e5521', '#403774', '#20495d', '#5d5120', '#2b5539', '#55305d'], '#5653ce', '#ffffff');
+const LIGHT_BRANCHES = branches(['#d6e6ff', '#d3f0e2', '#ecdcf7', '#ffe6c9', '#d3eef6', '#f9d8e2', '#e4f0cc', '#e1dcf9', '#d8e9f2', '#f6eecb', '#daeee0', '#eedaf1'],
+    '#1f2a44', ['#8fb3ec', '#86c9a8', '#bf9be0', '#e8b07a', '#86c3d9', '#e39bb2', '#a9c97a', '#a99fe6', '#93bdd3', '#d6c27a', '#93c7a3', '#cf9bd9'], '#5653ce', '#ffffff');
+
 const palettes = {
-    dark: { background: 'transparent', primaryColor: '#00284d', primaryTextColor: '#99ceff', primaryBorderColor: '#1a3e5f', secondaryColor: '#00284d', tertiaryColor: '#0b1a2b', lineColor: '#afafaf', textColor: '#ededed', mainBkg: '#00284d', nodeBorder: '#1a3e5f', clusterBkg: '#1c1c1c', clusterBorder: '#3a3a3a', edgeLabelBackground: '#000e1a', actorBkg: '#00284d', actorBorder: '#1a3e5f', actorTextColor: '#99ceff', actorLineColor: '#5a5a5a', signalColor: '#afafaf', signalTextColor: '#ededed', noteBkgColor: '#0b1a2b', noteTextColor: '#ededed', noteBorderColor: '#1a3e5f', labelBoxBkgColor: '#00284d', labelTextColor: '#99ceff', loopTextColor: '#ededed', sequenceNumberColor: '#000e1a' },
-    light: { background: 'transparent', primaryColor: '#e7f1fc', primaryTextColor: '#0b4a85', primaryBorderColor: '#bcd5ef', secondaryColor: '#e7f1fc', tertiaryColor: '#f5f9fd', lineColor: '#8a8a8a', textColor: '#1f2328', mainBkg: '#e7f1fc', nodeBorder: '#bcd5ef', clusterBkg: '#f6f7f9', clusterBorder: '#dde1e6', edgeLabelBackground: '#ffffff', actorBkg: '#e7f1fc', actorBorder: '#bcd5ef', actorTextColor: '#0b4a85', actorLineColor: '#b5b5b5', signalColor: '#6a6a6a', signalTextColor: '#1f2328', noteBkgColor: '#fff8e1', noteTextColor: '#1f2328', noteBorderColor: '#ecd9a0', labelBoxBkgColor: '#e7f1fc', labelTextColor: '#0b4a85', loopTextColor: '#1f2328', sequenceNumberColor: '#ffffff' },
+    dark: { ...DARK_BRANCHES, background: 'transparent', primaryColor: '#00284d', primaryTextColor: '#99ceff', primaryBorderColor: '#1a3e5f', secondaryColor: '#00284d', tertiaryColor: '#0b1a2b', lineColor: '#afafaf', textColor: '#ededed', mainBkg: '#00284d', nodeBorder: '#1a3e5f', clusterBkg: '#1c1c1c', clusterBorder: '#3a3a3a', edgeLabelBackground: '#000e1a', actorBkg: '#00284d', actorBorder: '#1a3e5f', actorTextColor: '#99ceff', actorLineColor: '#5a5a5a', signalColor: '#afafaf', signalTextColor: '#ededed', noteBkgColor: '#0b1a2b', noteTextColor: '#ededed', noteBorderColor: '#1a3e5f', labelBoxBkgColor: '#00284d', labelTextColor: '#99ceff', loopTextColor: '#ededed', sequenceNumberColor: '#000e1a' },
+    light: { ...LIGHT_BRANCHES, background: 'transparent', primaryColor: '#e7f1fc', primaryTextColor: '#0b4a85', primaryBorderColor: '#bcd5ef', secondaryColor: '#e7f1fc', tertiaryColor: '#f5f9fd', lineColor: '#8a8a8a', textColor: '#1f2328', mainBkg: '#e7f1fc', nodeBorder: '#bcd5ef', clusterBkg: '#f6f7f9', clusterBorder: '#dde1e6', edgeLabelBackground: '#ffffff', actorBkg: '#e7f1fc', actorBorder: '#bcd5ef', actorTextColor: '#0b4a85', actorLineColor: '#b5b5b5', signalColor: '#6a6a6a', signalTextColor: '#1f2328', noteBkgColor: '#fff8e1', noteTextColor: '#1f2328', noteBorderColor: '#ecd9a0', labelBoxBkgColor: '#e7f1fc', labelTextColor: '#0b4a85', loopTextColor: '#1f2328', sequenceNumberColor: '#ffffff' },
 };
 
 const ZOOM_MIN = 0.25, ZOOM_MAX = 6;
@@ -81,6 +95,8 @@ function stage() {
     if (!stageElement?.isConnected) {
         stageElement = document.createElement('div');
         stageElement.setAttribute('aria-hidden', 'true');
+        // Same label styling as on the page (e.g. bold node labels), so boxes are measured to fit.
+        stageElement.className = 'mermaid-stage';
         stageElement.style.cssText = 'position:fixed;left:-100000px;top:0;width:1600px;visibility:hidden;pointer-events:none;contain:layout style';
         document.body.appendChild(stageElement);
     }

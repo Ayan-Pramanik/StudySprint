@@ -1,7 +1,9 @@
 /** Pomodoro timer as pure state transitions; all times are epoch milliseconds. */
 export type Phase = 'focus' | 'short' | 'long';
 export type Status = 'idle' | 'running' | 'paused';
-export type PomodoroSettings = { focus: number; short: number; long: number; rounds: number; pauseAway: boolean };
+/** `strict`: leaving the tab during focus for longer than AWAY_GRACE withers the round's tree and ends it. */
+export type PomodoroSettings = { focus: number; short: number; long: number; rounds: number; pauseAway: boolean; strict: boolean };
+export const AWAY_GRACE = 15000;
 export type PomodoroState = {
     phase: Phase;
     status: Status;
@@ -24,13 +26,13 @@ export type PomodoroState = {
 export type FocusDay = { ms: number; rounds: number };
 export const HISTORY_DAYS = 120;
 
-export const defaultSettings: PomodoroSettings = { focus: 25, short: 5, long: 15, rounds: 4, pauseAway: true };
+export const defaultSettings: PomodoroSettings = { focus: 25, short: 5, long: 15, rounds: 4, pauseAway: true, strict: true };
 export const phaseLabel: Record<Phase, string> = { focus: 'Focus', short: 'Short break', long: 'Long break' };
 
 const clamp = (v: unknown, min: number, max: number, fallback: number) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback; };
 export function cleanSettings(s: Partial<PomodoroSettings> = {}): PomodoroSettings {
     const d = defaultSettings;
-    return { focus: clamp(s.focus, 1, 120, d.focus), short: clamp(s.short, 1, 60, d.short), long: clamp(s.long, 1, 60, d.long), rounds: clamp(s.rounds, 1, 12, d.rounds), pauseAway: typeof s.pauseAway === 'boolean' ? s.pauseAway : d.pauseAway };
+    return { focus: clamp(s.focus, 1, 120, d.focus), short: clamp(s.short, 1, 60, d.short), long: clamp(s.long, 1, 60, d.long), rounds: clamp(s.rounds, 1, 12, d.rounds), pauseAway: typeof s.pauseAway === 'boolean' ? s.pauseAway : d.pauseAway, strict: typeof s.strict === 'boolean' ? s.strict : d.strict };
 }
 
 export const duration = (s: PomodoroSettings, phase: Phase) => (phase === 'focus' ? s.focus : phase === 'short' ? s.short : s.long) * 60000;

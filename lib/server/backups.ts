@@ -469,6 +469,8 @@ export async function processRestoreJob(job: StoredImportJob): Promise<void> {
             const {notes:_notes,...next}=structuredClone(current.workspace);
             for (const kind of ['subjects', 'cards', 'events'] as const) (next[kind] as any[]).push(...restored[kind].filter(record => !next[kind].some(existing => existing.id === record.id)));
             for(const kind of ['quizzes','quizAttempts'] as const){next[kind]||=[];next[kind]!.push(...(restored[kind]||[]).filter(r=>!next[kind]!.some(e=>e.id===r.id)) as any);}
+            // Focus time, badges and goals (gamification): merged without double counting.
+            { const { mergeGamification } = await import('../gamification'); mergeGamification(next, metadata); }
             if (!current.workspace.notes.length && !current.workspace.cards.length && !current.workspace.subjects.length) {
                 if (Number.isInteger(metadata.limit) && metadata.limit >= 0 && metadata.limit <= 100) next.limit = metadata.limit;
                 if (typeof metadata.zone === 'string') { new Intl.DateTimeFormat('en', { timeZone: metadata.zone }); next.zone = metadata.zone; }

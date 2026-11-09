@@ -69,7 +69,18 @@ export type Workspace = {
     /** Absent in workspaces created before quizzes existed. */
     quizzes?: Quiz[];
     quizAttempts?: QuizAttempt[];
+    /** Gamification (all optional; absent in older workspaces). See lib/gamification.ts. */
+    goals?: StudyGoals;
+    focus?: FocusRecord;
+    achievements?: Record<string, string>;
+    /** Trees grown (or withered) by focus rounds, coins and unlocked tree kinds. See lib/grove.ts. */
+    grove?: Grove;
 };
+export type GroveTree = { id: string; species: string; at: string; minutes: number; withered?: true };
+export type Grove = { trees: GroveTree[]; coins: number; owned: string[]; selected: string; /** Bought lands and weather for the grove view, and the ones in use. */ lands?: string[]; land?: string; weathers?: string[]; weather?: string };
+export type StudyGoals = { reviews: number; focusMinutes: number; weekDays: number; celebrate: boolean };
+/** Completed focus time per day (YYYY-MM-DD in the workspace time zone), synced to the account. */
+export type FocusRecord = { days: Record<string, { ms: number; rounds: number }>; recent: string[]; imported: string[] };
 export const empty = (): Workspace => ({ subjects: [], notes: [], cards: [], events: [], limit: 10, zone: 'UTC' });
 export const uid = () => crypto.randomUUID();
 export const scheduler = fsrs({ enable_fuzz: false });

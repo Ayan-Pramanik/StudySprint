@@ -1,8 +1,9 @@
 'use client';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Bell, Pause, Play, RotateCcw, SkipForward, Maximize, Minimize, Timer, ShieldCheck } from 'lucide-react';
 import { notify, notifySystem } from '../lib/notifications';
-import { type Phase, type PomodoroSettings, type PomodoroState, back, cleanSettings, completedToday, defaultSettings, duration, focusDays, formatDuration, formatTime, initial, leave, locked, pause, phaseLabel, remaining, reset, skip, start, tick } from '../lib/pomodoro';
+import { MIN_TREE_MINUTES } from '../lib/grove';
+import { AWAY_GRACE, type Phase, type PomodoroSettings, type PomodoroState, back, cleanSettings, completedToday, defaultSettings, duration, focusDays, formatDuration, formatTime, initial, leave, locked, pause, phaseLabel, remaining, reset, skip, start, tick } from '../lib/pomodoro';
 
 // Per-browser state, like the theme: the timer belongs to this device, not the workspace.
 const STATE_KEY = 'studysprint-pomodoro', SETTINGS_KEY = 'studysprint-pomodoro-settings';
@@ -43,17 +44,64 @@ function chime(finished: Phase) {
         notes.forEach((f, i) => { const o = audio!.createOscillator(), g = audio!.createGain(), t = audio!.currentTime + i * .28; o.frequency.value = f; g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.25, t + .02); g.gain.exponentialRampToValueAtTime(.0001, t + .25); o.connect(g).connect(audio!.destination); o.start(t); o.stop(t + .26); });
     } catch { /* sound is optional */ }
 }
+/*
+ * Completed focus rounds also count in the account (XP, badges, goals on every device). Each round
+ * is queued in this browser and the app uploads the queue (see useFocusSync in WorkspaceApp). The id
+ * comes from the round's end time, so two open tabs noticing the same round record it once.
+ */
+export type FocusRound = { id: string; at: string; ms: number; /** Tree kind grown (see lib/grove.ts). */ species?: string; /** Abandoned partway: a withered tree. */ withered?: true };
+// The tree being grown this round; the app sets it from the account's grove.
+let treeSpecies = 'oak';
+export function setFocusTree(species: string) { treeSpecies = species; }
+const PENDING_KEY = 'studysprint-focus-pending';
+const roundListeners = new Set<() => void>();
+export function pendingRounds(): FocusRound[] { const v = (() => { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]'); } catch { return []; } })(); return Array.isArray(v) ? v.filter(r => r && typeof r.id === 'string' && typeof r.at === 'string' && typeof r.ms === 'number') : []; }
+export function removePendingRound(id: string) { write(PENDING_KEY, pendingRounds().filter(r => r.id !== id)); }
+function recordRound(round: FocusRound) { const list = pendingRounds(); if (!list.some(r => r.id === round.id)) write(PENDING_KEY, [...list, round].slice(-200)); roundListeners.forEach(l => l()); }
+/** Called whenever a focus round is queued for upload. */
+export function onFocusRound(listener: () => void) { roundListeners.add(listener); return () => { roundListeners.delete(listener); }; }
+/** This browser's focus history from before rounds were synced, for a one-time upload. */
+export function localFocusHistory() { return current().state.history; }
+
 /** Toast (and, when allowed and the page is in the background, a system notification) for a finished phase. */
 function announce(finished: Phase, next: Phase) {
     const title = finished === 'focus' ? 'Focus round complete' : `${phaseLabel[finished]} is over`;
-    const message = finished === 'focus' ? `Nice work. Start your ${phaseLabel[next].toLowerCase()} when you’re ready.` : 'Start your next focus round when you’re ready.';
+    const coins = Math.floor(duration(current().settings, 'focus') / 60000), grows = coins >= MIN_TREE_MINUTES;
+    const message = finished !== 'focus' ? 'Start your next focus round when you’re ready.' : grows ? `Your tree has grown. +${coins} coins. Start your ${phaseLabel[next].toLowerCase()} when you’re ready.` : `Nice focus. Rounds of ${MIN_TREE_MINUTES}+ minutes also grow a tree and earn coins.`;
     notify({ kind: 'timer', title, message });
     notifySystem(title, message);
 }
+/**
+ * Ends a focus round that was abandoned partway (reset, skipped, or left for too long in strict
+ * mode): its tree withers and earns nothing. Rounds stopped in the first 30 seconds don't count.
+ */
+function abandon(reason: 'reset' | 'skip' | 'away') {
+    const { state, settings } = current(), now = Date.now();
+    if (state.phase !== 'focus' || state.status === 'idle') return false;
+    // Rounds too short to grow a tree can't wither one either.
+    if (settings.focus < MIN_TREE_MINUTES) return false;
+    const elapsed = duration(settings, 'focus') - remaining(state, now);
+    if (elapsed < 30000) return false;
+    recordRound({ id: 'wither-' + now, at: new Date(now).toISOString(), ms: Math.round(elapsed), species: treeSpecies, withered: true });
+    notify({ kind: 'timer', title: 'Your tree withered', message: reason === 'away' ? `You left this tab for more than ${AWAY_GRACE / 1000} seconds during focus. Stay on the page to keep your next tree growing.` : 'The focus round ended early. Finish a whole round to grow a tree and earn coins.' });
+    return true;
+}
+/** Strict mode: away from the tab for too long during focus withers the tree and ends the round. */
+function checkAway(now = Date.now()) {
+    const { state, settings } = current();
+    if (!settings.strict || state.phase !== 'focus' || !state.awaySince || now - state.awaySince <= AWAY_GRACE) return false;
+    abandon('away');
+    commit(reset({ ...state, awaySince: 0, awayPaused: false }, settings));
+    return true;
+}
 function step() {
+    if (checkAway()) return;
     const { state, settings } = current();
     const r = tick(state, settings, Date.now());
-    if (r.finished) { commit(r.state); chime(r.finished); announce(r.finished, r.state.phase); }
+    if (r.finished) {
+        if (r.finished === 'focus') recordRound({ id: 'focus-' + state.endsAt, at: new Date(state.endsAt).toISOString(), ms: duration(settings, 'focus'), species: treeSpecies });
+        commit(r.state); chime(r.finished); announce(r.finished, r.state.phase);
+    }
     // Idle timers have nothing to count down.
     else if (state.status !== 'idle') { snapshot = { ...current(), now: Date.now() }; emit(); }
 }
@@ -77,8 +125,10 @@ export const pomodoro = {
         update(start(current().state, Date.now()));
     },
     pause() { update(pause(current().state, Date.now())); },
-    reset() { commit(reset(current().state, current().settings)); notify({ kind: 'timer', message: 'Timer reset.' }); },
-    skip() { const from = current().state.phase; commit(skip(current().state, current().settings, Date.now())); notify({ kind: 'timer', message: `Skipped ${phaseLabel[from].toLowerCase()}. Next: ${phaseLabel[current().state.phase].toLowerCase()}.` }); },
+    reset() { const withered = abandon('reset'); commit(reset(current().state, current().settings)); if (!withered) notify({ kind: 'timer', message: 'Timer reset.' }); },
+    skip() { const from = current().state.phase, withered = abandon('skip'); commit(skip(current().state, current().settings, Date.now())); if (!withered) notify({ kind: 'timer', message: `Skipped ${phaseLabel[from].toLowerCase()}. Next: ${phaseLabel[current().state.phase].toLowerCase()}.` }); },
+    /** True when returning after too long away (strict mode) withered the round's tree. */
+    checkAway() { return checkAway(); },
     leave() { update(leave(current().state, current().settings, Date.now())); },
     back() { const r = back(current().state, Date.now()); if (r.away) commit(r.state); return r; },
     settings(next: Partial<PomodoroSettings>) {
@@ -100,7 +150,7 @@ function awayText(ms: number) { const s = Math.round(ms / 1000); return s < 60 ?
 export function PomodoroGuard() {
     const { state, now } = usePomodoro();
     const isLocked = locked(state);
-    const [returned, setReturned] = useState<{ away: number; paused: boolean; interruptions: number }>();
+    const [returned, setReturned] = useState<{ away: number; paused: boolean; interruptions: number; withered?: boolean }>();
     const title = useRef('');
     useEffect(() => {
         if (!isLocked) return;
@@ -111,11 +161,13 @@ export function PomodoroGuard() {
     useEffect(() => {
         const change = () => {
             if (document.visibilityState === 'hidden') { pomodoro.leave(); return; }
+            const awaySince = current().state.awaySince;
+            if (pomodoro.checkAway()) { setReturned({ away: Date.now() - awaySince, paused: false, interruptions: current().state.interruptions, withered: true }); return; }
             const r = pomodoro.back();
             if (r.away >= 2000) setReturned({ away: r.away, paused: r.paused, interruptions: r.state.interruptions });
         };
         // A reload while away still counts the absence once the page is visible.
-        if (document.visibilityState === 'visible') pomodoro.back();
+        if (document.visibilityState === 'visible' && !pomodoro.checkAway()) pomodoro.back();
         document.addEventListener('visibilitychange', change);
         return () => document.removeEventListener('visibilitychange', change);
     }, []);
@@ -127,10 +179,12 @@ export function PomodoroGuard() {
     }, [label]);
     useEffect(() => () => { if (title.current) document.title = title.current; }, []);
     if (!returned) return null;
-    return <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="focus-return-title"><div className="modal focus-return"><h2 id="focus-return-title">Welcome back. Stay with it.</h2>
+    return <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="focus-return-title"><div className="modal focus-return">{returned.withered ? <><h2 id="focus-return-title">Your tree withered.</h2>
+        <p>You were away from your focus session for {awayText(returned.away)}, more than the {AWAY_GRACE / 1000} seconds allowed, so this round ended without a tree or coins. Start a new round and stay on the page to grow the next one.</p>
+        <div className="actions"><button className="primary" autoFocus onClick={() => setReturned(undefined)}>Plant a new tree</button></div></> : <><h2 id="focus-return-title">Welcome back. Stay with it.</h2>
         <p>You left your focus session for {awayText(returned.away)}. {returned.paused ? 'The timer was paused while you were away, so that time doesn’t count.' : 'The timer kept running while you were away.'}</p>
         <p className="small">{plural(returned.interruptions, 'interruption')} this session.</p>
-        <div className="actions"><button className="primary" autoFocus onClick={() => setReturned(undefined)}>Back to focus</button></div></div></div>;
+        <div className="actions"><button className="primary" autoFocus onClick={() => setReturned(undefined)}>Back to focus</button></div></>}</div></div>;
 }
 
 /** Compact countdown for the top bar; hidden while the timer is idle. */
@@ -154,7 +208,8 @@ function DesktopNotifications() {
 
 function onFullscreen(l: () => void) { document.addEventListener('fullscreenchange', l); return () => document.removeEventListener('fullscreenchange', l); }
 
-export function FocusTimer() {
+/** `tree` draws the growing tree inside the ring; it gets this round's progress (0–1) and whether focus is on. */
+export function FocusTimer({ tree }: { tree?: (progress: number, focusing: boolean) => ReactNode } = {}) {
     const { state, settings, now } = usePomodoro();
     const left = remaining(state, now), total = duration(settings, state.phase);
     const progress = Math.min(1, Math.max(0, 1 - left / total));
@@ -169,7 +224,7 @@ export function FocusTimer() {
             <div className="segmented" aria-label="Phase">{(['focus', 'short', 'long'] as Phase[]).map(p => <span key={p} className={state.phase === p ? 'selected' : ''}>{phaseLabel[p]}</span>)}</div>
             <div className="focus-ring" role="timer" aria-live="off" aria-label={`${phaseLabel[state.phase]}: ${formatTime(left)} left`}>
                 <svg viewBox="0 0 260 260" aria-hidden="true"><circle cx="130" cy="130" r={r} className="track"/><circle cx="130" cy="130" r={r} className="progress" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - progress)}/></svg>
-                <div><strong>{formatTime(left)}</strong><small>{state.status === 'paused' ? (state.awayPaused ? 'Paused while away' : 'Paused') : running ? phaseLabel[state.phase] : 'Ready'}</small></div>
+                <div>{tree && state.phase === 'focus' && settings.focus >= MIN_TREE_MINUTES && <span className="focus-tree">{tree(idle ? 0 : progress, !idle)}</span>}<strong>{formatTime(left)}</strong><small>{state.status === 'paused' ? (state.awayPaused ? 'Paused while away' : 'Paused') : running ? phaseLabel[state.phase] : 'Ready'}</small></div>
             </div>
             <div className="focus-rounds" aria-label={`Round ${Math.min(state.round + 1, settings.rounds)} of ${settings.rounds}`}>{Array.from({ length: settings.rounds }, (_, i) => <i key={i} className={i < state.round ? 'done' : ''}/>)}</div>
             <div className="actions focus-actions">
@@ -178,19 +233,22 @@ export function FocusTimer() {
                 <button onClick={pomodoro.skip}><SkipForward size={16}/>{state.phase === 'focus' ? 'Skip to break' : 'Skip break'}</button>
                 {canFullscreen && <button onClick={toggleFullscreen}>{fullscreen ? <Minimize size={16}/> : <Maximize size={16}/>}{fullscreen ? 'Exit full screen' : 'Full screen'}</button>}
             </div>
+            {tree && settings.focus < MIN_TREE_MINUTES && <p className="focus-lock">Trees grow from focus rounds of {MIN_TREE_MINUTES} minutes or more. Set Focus to at least {MIN_TREE_MINUTES} to grow one.</p>}
             {locked(state) && <p className="focus-lock"><ShieldCheck size={15}/>Focus lock is on. Closing or reloading this page will ask first{settings.pauseAway ? ', and the timer pauses if you switch tabs' : ''}.</p>}
         </section>
         <aside><section className="panel"><h2>This session</h2><div className="focus-stats"><div><strong>{completedToday(state, now)}</strong><small>focus rounds today</small></div><div><strong>{state.interruptions}</strong><small>interruptions</small></div><div><strong>{formatTime(state.awayMs)}</strong><small>time away</small></div></div></section>
             <section className="panel"><h2>Timer settings</h2>{!idle && <p className="small">Reset or finish the current round to change these.</p>}
                 <div className="focus-fields">{field('focus', 'Focus (min)', 120)}{field('short', 'Short break (min)', 60)}{field('long', 'Long break (min)', 60)}{field('rounds', 'Rounds before long break', 12)}</div>
                 <DesktopNotifications/>
+                <label className="checkbox"><input type="checkbox" checked={settings.strict} onChange={e => pomodoro.settings({ strict: e.target.checked })}/>Grow trees: leaving this tab for more than {AWAY_GRACE / 1000} seconds during focus withers the tree</label>
                 <label className="checkbox"><input type="checkbox" checked={settings.pauseAway} onChange={e => pomodoro.settings({ pauseAway: e.target.checked })}/>Pause the timer while I’m away from this tab</label>
                 <p className="small">Saved in this browser. Browsers don’t allow a page to block switching tabs or apps; this timer asks before the page closes and makes time away visible.</p></section></aside></div></>;
 }
 
-/** Focus time on the Progress page. Recorded in this browser, so it is not part of workspace backups. */
-export function FocusProgress({ open }: { open: () => void }) {
-    const { state, now } = usePomodoro();
+/** Focus time on the Progress page: the account's synced totals, or this browser's history before they load. */
+export function FocusProgress({ open, account }: { open: () => void; /** Focus synced to the account, when available. */ account?: Record<string, { ms: number; rounds: number }> }) {
+    const local = usePomodoro(), now = local.now;
+    const state = account ? { ...local.state, history: account, total: Object.values(account).reduce((t, d) => ({ ms: t.ms + d.ms, rounds: t.rounds + d.rounds }), { ms: 0, rounds: 0 }) } : local.state;
     const week = focusDays(state, now);
     const weekMs = week.reduce((sum, d) => sum + d.ms, 0), max = Math.max(...week.map(d => d.ms), 1);
     return <section className="panel focus-progress"><div className="section-heading"><h2>Focus time</h2><button className="text-button" onClick={open}>Open Focus</button></div>
@@ -199,5 +257,5 @@ export function FocusProgress({ open }: { open: () => void }) {
             <div className="stat"><div className="row"><span>Last 7 days</span></div><strong>{formatDuration(weekMs)}</strong><small>{plural(week.reduce((n, d) => n + d.rounds, 0), 'round')}</small></div>
             <div className="stat"><div className="row"><span>Daily average</span></div><strong>{formatDuration(weekMs / 7)}</strong><small>over the last 7 days</small></div></div>
         <div className="bars">{week.map(d => <div key={d.day}><span>{Math.round(d.ms / 60000)}m</span><div className="bar focus-bar" style={{ height: `${Math.max(3, Math.round(150 * d.ms / max))}px` }}/><small>{new Date(d.day + 'T12:00').toLocaleDateString(undefined, { weekday: 'short' })}</small></div>)}</div>
-        <p className="small">Counts completed focus rounds only; skipped or reset rounds aren’t included. Recorded in this browser.</p></section>;
+        <p className="small">Counts completed focus rounds only; skipped or reset rounds aren’t included. {account ? 'Saved to your account, so it counts on every device.' : 'Recorded in this browser.'}</p></section>;
 }

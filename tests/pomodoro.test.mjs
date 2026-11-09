@@ -65,7 +65,7 @@ test('breaks and manual pauses are not guarded', () => {
 });
 
 test('settings are clamped and time is formatted', () => {
-  assert.deepEqual(cleanSettings({ focus: 0, short: 999, long: 'x', rounds: 3.6, pauseAway: 'yes' }), { focus: 1, short: 60, long: 15, rounds: 4, pauseAway: true });
+  assert.deepEqual(cleanSettings({ focus: 0, short: 999, long: 'x', rounds: 3.6, pauseAway: 'yes' }), { focus: 1, short: 60, long: 15, rounds: 4, pauseAway: true, strict: true });
   assert.equal(formatTime(25 * min), '25:00');
   assert.equal(formatTime(61001), '01:02');
 });

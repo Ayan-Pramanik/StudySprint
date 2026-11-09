@@ -7,6 +7,8 @@ import { importMarkdownNotes } from '../../../lib/markdown-notes';
 import { importCards } from '../../../lib/card-import';
 import { importQuizzes, recordAttempt } from '../../../lib/quiz';
 import { clozeDrafts } from '../../../lib/generation';
+import { importFocusDays, recordFocusRound, setGoals, unlock } from '../../../lib/gamification';
+import { buyScene, buyTree, plantTree, selectTree, witherTree } from '../../../lib/grove';
 
 
 async function aiFetch(url: string, init: RequestInit) { let response: Response | undefined; for (let attempt = 0; attempt < 2; attempt++) {
@@ -159,6 +161,14 @@ export async function POST(req: Request) {
             card().life = z.enum(['draft', 'active', 'suspended', 'archived']).parse(p.life);
         else if (action === 'deleteCard')
             w.cards = w.cards.filter(c => c.id !== p.id);
+        else if (action === 'focusRound') { const added = recordFocusRound(w, p); result = { added, coins: added ? plantTree(w, p) : 0 }; }
+        else if (action === 'witherTree') { result = witherTree(w, p); }
+        else if (action === 'buyTree') { buyTree(w, p); }
+        else if (action === 'selectTree') { selectTree(w, p); }
+        else if (action === 'buyScene') { buyScene(w, p); }
+        else if (action === 'focusImport') { result = importFocusDays(w, p); }
+        else if (action === 'goals') { setGoals(w, p); }
+        else if (action === 'unlock') { unlock(w, p); }
         else if (action === 'deleteCards') {
             // Bulk delete of selected flashcards. Review events stay, as with deleteCard.
             const ids = new Set(z.array(z.string().max(100)).min(1).max(10000).parse(p.ids));

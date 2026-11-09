@@ -1,6 +1,7 @@
 import {z} from 'zod';
 import {uid,preview,normalizeTags,type Workspace} from './study';
 import {quizSchema,attemptSchema} from './quiz';
+import {mergeGamification} from './gamification';
 const text=z.string().max(1048576).refine(v=>new TextEncoder().encode(v).length<=1048576,'Note exceeds 1 MiB of text'), id=z.string().min(1).max(100), stamp=z.string().datetime();
 const subject=z.object({id,name:z.string().trim().min(1).max(100)});
 const note=z.object({id,subject:z.union([id,z.literal('')]),title:z.string().trim().min(1).max(200),body:text,aliases:z.array(text).max(1000),bindings:z.record(id).optional(),updated:stamp,version:z.number().int().positive(),versions:z.array(z.object({version:z.number().int().positive(),body:text,at:stamp})).max(1000).optional(),tags:z.array(z.string().max(200)).max(200).optional()});
@@ -24,5 +25,6 @@ export function importBackup(w:Workspace,input:unknown){
  const quizIds=new Set((data.quizzes||[]).map(q=>q.id));
  w.quizzes=[...(w.quizzes||[]),...(data.quizzes||[]).map(q=>({...q,id:mapped('quiz',q.id),subject:q.subject&&subjectIds.has(q.subject)?mapped('subject',q.subject):''}))];
  w.quizAttempts=[...(w.quizAttempts||[]),...(data.quizAttempts||[]).filter(a=>quizIds.has(a.quiz)).map(a=>({...a,id:uid(),quiz:mapped('quiz',a.quiz)}))];
+ const raw=(input as {workspace?:unknown})?.workspace;if(raw&&typeof raw==='object')mergeGamification(w,raw as Parameters<typeof mergeGamification>[1]);
  return {notes:data.notes.length,cards:data.cards.length};
 }
