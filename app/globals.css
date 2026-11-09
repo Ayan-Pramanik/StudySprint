@@ -187,17 +187,17 @@ main.notes-main{max-width:none;padding:16px 20px}@media(min-width:801px){.notes-
 .prose .katex{overflow-wrap:normal;text-indent:0}
 
 /* Collapsible workspace navigation: links keep their original routes and labels. */
-.sidebar-toggle{position:absolute;right:8px;top:8px;padding:5px;background:transparent}
+.sidebar-toggle{padding:5px;background:transparent;border-color:transparent;color:var(--muted);flex-shrink:0}
 .sidebar .brand-name{white-space:nowrap}
 @media(min-width:801px){
- .sidebar-collapsed .sidebar{width:72px;padding:42px 10px 20px}
+ .sidebar-collapsed .sidebar{width:72px;padding:31px 10px 20px}
  .sidebar-collapsed .main-wrap{margin-left:72px}
  .sidebar-collapsed .brand{justify-content:center;margin-bottom:28px}
  .sidebar-collapsed :is(.brand-name,.workspace-label,.subject-nav,.sidebar-bottom,.sidebar-divider,.nav-label,.nav-count){display:none}
  .sidebar-collapsed .nav{justify-content:center;padding:12px 0;font-size:0}
  .sidebar-collapsed .nav svg,.sidebar-collapsed .create svg{flex-shrink:0}
  .sidebar-collapsed .create{justify-content:center;padding:12px 0}
- .sidebar-collapsed .sidebar-toggle{right:22px}
+ .sidebar-collapsed .sidebar .brand{display:none}
 }
 @media(max-width:800px){.sidebar-toggle{display:none}.sidebar .nav-label,.sidebar .brand-name{display:none}}
 /* Focused reading uses the whole screen and keeps its exit action within reach. */
@@ -303,3 +303,38 @@ i.toast-countdown{position:absolute;left:0;bottom:0;height:2px;width:100%;backgr
 .quiz-resume p{margin:2px 0 0}
 .quiz-resume>svg{color:#d08a2c;flex-shrink:0}
 @media (max-width:600px){.quiz-resume{flex-wrap:wrap}}
+
+/* Settings: bulk delete of uncategorised notes */
+.uncategorised-settings{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+.uncategorised-settings h3{margin:0 0 2px}
+.uncategorised-settings p{margin:0}
+.bulk-delete-list{margin:0 0 16px;padding-left:20px;max-height:180px;overflow:auto;font-size:calc(13px*var(--fs,1))}
+.bulk-delete-list li{margin:2px 0;overflow-wrap:anywhere}
+
+/* Sidebar header: collapse button beside the name; collapsed, the logo expands the sidebar */
+.sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:49px;min-width:0}
+.sidebar-head .brand{margin-bottom:0;min-width:0}
+.sidebar-expand{display:none;padding:0;border:0;background:transparent;margin:0 auto;border-radius:10px}
+.sidebar-expand:hover{background:transparent}
+.sidebar-expand .brandmark{position:relative}
+.sidebar-expand .brand-open{position:absolute;opacity:0;transition:opacity .15s}
+.sidebar-expand .brand-logo{transition:opacity .15s}
+.sidebar-expand:is(:hover,:focus-visible) .brand-open{opacity:1}
+.sidebar-expand:is(:hover,:focus-visible) .brand-logo{opacity:0}
+@media(min-width:801px){.sidebar-collapsed .sidebar-head{justify-content:center;margin-bottom:28px}.sidebar-collapsed .sidebar-expand{display:inline-flex}}
+@media(max-width:800px){.sidebar-head{justify-content:center;margin-bottom:35px}}
+.sidebar-head .brandmark{flex-shrink:0}
+@media(min-width:801px) and (max-width:1200px){.sidebar-head .brand{gap:7px;font-size:calc(18px*var(--fs,1))}.sidebar-head .brand-dot{margin-left:-6px}}
+
+/* Cards: bulk selection */
+.bulk-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:-8px 0 16px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:white;min-height:46px;font-size:calc(13px*var(--fs,1))}
+.bulk-bar.active{border-color:#c5c3f2;background:#f4f3fd}
+.bulk-bar .checkbox{margin:0;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.bulk-count{font-weight:600;color:var(--indigo)}
+.bulk-bar .danger{margin-left:auto;padding:6px 12px}
+.card-select{width:16px;height:16px;margin:0 -6px 0 0;cursor:pointer;accent-color:var(--indigo);flex-shrink:0}
+.library-card .row:has(.card-select){justify-content:flex-start}
+.library-card .row:has(.card-select)>.muted{margin-left:auto}
+.library-card.selected{border-color:var(--indigo);box-shadow:0 0 0 1px var(--indigo)}
+[data-theme=dark] .bulk-bar{background:var(--surface)}
+[data-theme=dark] .bulk-bar.active{background:var(--accent-bg);border-color:#4a47a0}

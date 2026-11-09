@@ -17,7 +17,7 @@ async function aiFetch(url: string, init: RequestInit) { let response: Response 
         await new Promise(r => setTimeout(r, 500));
 } return response!; }
 const json = (data: unknown, status = 200, cookie?: string) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...(cookie ? { 'Set-Cookie': cookie } : {}) } });
-export async function GET(req: Request) { try { const {id,user}=await ensureWorkspace(req);const {workspace,version}=await readSnapshot(id);return json({workspace,version,ai:!!env.AI_API_KEY,uploads:!!(env.BUCKET&&env.IMPORT_QUEUE&&env.CONVERTER_URL&&env.CONVERTER_SECRET),user}); } catch(e){return errorResponse(e);} }
+export async function GET(req: Request) { try { const {id,user}=await ensureWorkspace(req);const {workspace,version}=await readSnapshot(id);return json({workspace,version,ai:!!env.AI_API_KEY,uploads:!!(env.BUCKET&&env.CONVERTER_URL&&env.CONVERTER_SECRET),user}); } catch(e){return errorResponse(e);} }
 export async function POST(req: Request) {
     try {
         checkOrigin(req);
@@ -72,7 +72,13 @@ export async function POST(req: Request) {
         }
         else if (action === 'deleteSubject') {
             w.subjects = w.subjects.filter(s => s.id !== p.id);
-            // Notes are kept as uncategorised rather than deleted with their subject.
+            // notes: true deletes the subject's notes (and, with cards: true, their flashcards). Otherwise
+            // notes are kept as uncategorised. Quizzes and remaining cards always become uncategorised.
+            if (p.notes === true) {
+                const gone = new Set(w.notes.filter(n => n.subject === p.id).map(n => n.id));
+                w.notes = w.notes.filter(n => !gone.has(n.id));
+                if (p.cards === true) w.cards = w.cards.filter(c => !c.note || !gone.has(c.note));
+            }
             w.notes.forEach(n => { if (n.subject === p.id)
                 n.subject = ''; });
             w.cards.forEach(c => { if (c.subject === p.id)
@@ -124,6 +130,13 @@ export async function POST(req: Request) {
             if (p.cards === true)
                 w.cards = w.cards.filter(c => c.note !== p.id);
         }
+        else if (action === 'deleteNotes') {
+            // Bulk delete (e.g. every uncategorised note). Only the ids the person confirmed are removed.
+            const ids = new Set(z.array(z.string().max(100)).min(1).max(5000).parse(p.ids));
+            w.notes = w.notes.filter(n => !ids.has(n.id));
+            if (p.cards === true)
+                w.cards = w.cards.filter(c => !c.note || !ids.has(c.note));
+        }
         else if (action === 'card') {
             const n = w.notes.find(n => n.id === p.note);
             if(p.note && !n) throw Error('Source note unavailable');
@@ -146,6 +159,11 @@ export async function POST(req: Request) {
             card().life = z.enum(['draft', 'active', 'suspended', 'archived']).parse(p.life);
         else if (action === 'deleteCard')
             w.cards = w.cards.filter(c => c.id !== p.id);
+        else if (action === 'deleteCards') {
+            // Bulk delete of selected flashcards. Review events stay, as with deleteCard.
+            const ids = new Set(z.array(z.string().max(100)).min(1).max(10000).parse(p.ids));
+            w.cards = w.cards.filter(c => !ids.has(c.id));
+        }
         else if (action === 'acknowledge') {
             const c = card();
             c.sourceVersion = w.notes.find(n => n.id === c.note)?.version || c.sourceVersion;

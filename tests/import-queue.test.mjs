@@ -107,4 +107,26 @@ test('cancellation during an owned delivery prevents publication and remains can
     } finally {state.close();}
 });
 
+test('without a queue binding the job runs inline and publishes its note', async()=>{
+    const state=await fixture('queued');
+    try {
+        assert.equal(globalThis.__studySprintQueueEnv.IMPORT_QUEUE,undefined);
+        await consumer.enqueueImportJob(state.id);
+        const row=state.raw.prepare('SELECT * FROM import_jobs WHERE id=?').get(state.id);
+        assert.equal(row.status,'ready');
+        assert.equal(state.raw.prepare('SELECT body FROM notes WHERE id=?').get(state.id).body,state.text);
+    } finally {state.close();}
+});
+
+test('with a queue binding the job is only sent to the queue', async()=>{
+    const state=await fixture('queued');
+    const sent=[];
+    globalThis.__studySprintQueueEnv.IMPORT_QUEUE={async send(body){sent.push(body);}};
+    try {
+        await consumer.enqueueImportJob(state.id);
+        assert.deepEqual(sent,[{id:state.id}]);
+        assert.equal(state.raw.prepare('SELECT status FROM import_jobs WHERE id=?').get(state.id).status,'queued');
+    } finally {delete globalThis.__studySprintQueueEnv.IMPORT_QUEUE;state.close();}
+});
+
 test.after(async()=>{delete globalThis.__studySprintQueueEnv;await rm(temporary,{recursive:true,force:true});});

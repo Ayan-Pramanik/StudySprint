@@ -1,10 +1,9 @@
-import {env} from 'cloudflare:workers';
 import {z} from 'zod';
 import {checkOrigin,errorResponse,getBucket,HttpError,requireWorkspaceId} from '@/lib/server/workspace-store';
 import {createImportJob,DOCUMENT_TYPES,enqueueImportJob,failImport,getImportJob,listImportJobs,MAX_UPLOAD_BYTES,publicJob} from '@/lib/server/import-jobs';
 export async function GET(req:Request){try{return Response.json({jobs:await listImportJobs(await requireWorkspaceId(req))},{headers:{'Cache-Control':'no-store'}});}catch(e){return errorResponse(e);}}
 export async function POST(req:Request){let storedKey:string|undefined;try{
- checkOrigin(req);const workspace=await requireWorkspaceId(req);if(!env.IMPORT_QUEUE)throw new HttpError(503,'Background imports are unavailable.');
+ checkOrigin(req);const workspace=await requireWorkspaceId(req);
  const limit=MAX_UPLOAD_BYTES+65536;if(Number(req.headers.get('content-length'))>limit)throw new HttpError(413,'Choose a file no larger than 10 MiB.');if(!req.body)throw new HttpError(400,'Choose a file.');let total=0;const bounded=req.body.pipeThrough(new TransformStream<Uint8Array,Uint8Array>({transform(chunk,controller){total+=chunk.length;if(total>limit)throw new HttpError(413,'Choose a file no larger than 10 MiB.');controller.enqueue(chunk);}}));
  const form=await new Response(bounded,{headers:{'Content-Type':req.headers.get('content-type')||''}}).formData();const file=form.get('file');if(!(file instanceof File)||!file.size)throw new HttpError(400,'Choose a non-empty document.');if(file.size>MAX_UPLOAD_BYTES)throw new HttpError(413,'Choose a file no larger than 10 MiB.');const name=file.name.replace(/[\x00-\x1f/\\]/g,'_').slice(0,200),extension=name.split('.').pop()!.toLowerCase(),mediaType=DOCUMENT_TYPES[extension];if(!mediaType)throw new HttpError(415,'Choose a PDF, DOCX, PPTX, Markdown, or TXT file.');
  const id=z.string().uuid().parse(form.get('requestId')||crypto.randomUUID());try{const existing=await getImportJob(id,workspace);return Response.json({job:publicJob(existing)},{status:202});}catch(e){if(!(e instanceof HttpError&&e.status===404))throw e;}

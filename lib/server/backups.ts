@@ -257,7 +257,6 @@ export async function startBackupUpload(req: Request): Promise<Response> {
     await sameOrigin(req);
     const { requireWorkspaceId, getBucket } = await store();
     const workspace = await requireWorkspaceId(req);
-    const {env}=await import('cloudflare:workers');if(!env.IMPORT_QUEUE)return reject(503,'Background backup restoration is not configured.');
     const input = z.object({ name: z.string().trim().min(1).max(255), size: z.number().int().min(22).max(MAX_BACKUP_BYTES),markdown:z.boolean().optional(),folders:z.boolean().optional(),subject:z.string().max(100).optional(),newSubject:z.string().max(100).optional() }).strict().parse(await jsonInput(req));
     if (!/\.zip$/i.test(input.name)) throw Error('Choose a StudySprint .zip backup.');
     const uploadId = crypto.randomUUID();

@@ -28,7 +28,7 @@ export type Note = {
 };
 export type SourceFile = { id: string; name: string; mediaType: string; size: number; preview: 'pdf' | 'text'; derivedPreview: boolean; ocr: boolean };
 export type NoteSummary = Omit<Note, 'body' | 'versions' | 'assets'> & { preview: string; linkTitles: string[]; versions?: { version: number; at: string }[] };
-export type ImportJob = { id: string; name: string; title: string; kind: 'document' | 'restore' | 'reconvert' | 'prepare' | 'export'; status: 'queued' | 'processing' | 'ready' | 'failed' | 'cancelled'; noteId?: string; error?: string; updated: string; pendingApply?:boolean; appliedVersion?:number; expires?:string; annotationVersion?:number };
+export type ImportJob = { /** A Markdown import (it runs as a restore job). */ markdown?: boolean; id: string; name: string; title: string; kind: 'document' | 'restore' | 'reconvert' | 'prepare' | 'export'; status: 'queued' | 'processing' | 'ready' | 'failed' | 'cancelled'; noteId?: string; error?: string; updated: string; pendingApply?:boolean; appliedVersion?:number; expires?:string; annotationVersion?:number };
 export type WorkspaceSnapshot = Omit<Workspace, 'notes'> & { notes: NoteSummary[] };
 export type LinkedNote = Note | NoteSummary;
 type StudyWorkspace = Omit<Workspace, 'notes'> & { notes: LinkedNote[] };
